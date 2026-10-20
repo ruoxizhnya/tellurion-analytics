@@ -4,9 +4,11 @@
 
 ## 1. 这是什么仓
 
-分析服务：基准 / 归因 / 敏感性 / 蒙特卡洛。**纯函数、只读**——不持有状态、不写业务表。
+分析服务：基准 / 归因 / 敏感性 / 蒙特卡洛。**纯函数、只读上游**——不持有跨请求状态、不写任何上游表；但**拥有自己的结果表** `analysis.*`（reports / benchmarks / sensitivity_runs / mc_runs / attribution，见 `docs/db-schema.md`）。
 
 **状态**：预留（S0 占位，触发式启动）——尚未启动，无实现
+
+**今天的实现**：`core:pkg/backtest/metrics`（绩效指标）+ `core:pkg/data/factor_attribution.go`（因子归因 —— ⚠️ 算法住在数据包里，属历史遗留）+ `core:pkg/indicator`。
 
 ## 2. 构建 / 测试（必须单仓可跑）
 
@@ -26,11 +28,12 @@ go test ./...
 
 - 基准比较、归因分解、敏感性、蒙特卡洛等只读计算
 - 接受数据集快照 hash 作为输入（可复现）
+- **写自己的结果表** `analysis.*`（只写自己 schema）
 
 **禁止**
 
-- 写任何业务表（只读是硬边界）
-- 持有跨请求状态
+- 写**上游**表（core / data / risk / strategy 的任何 schema）——"只读"指的是上游，不是"什么都不写"
+- 持有跨请求状态（结果落 `analysis.*`，不落内存）
 - import core 的实现包
 - 自己做数据抓取（那是 data 服务）
 
