@@ -1,36 +1,71 @@
-# 本仓边界与依赖方向 — tellurion-analytics
+---
+status: active
+last-verified: 2026-10-20
+verified-by: 功能边界固化（三份契约：db / api / dataflow）
+---
 
-## 定位
+# 架构 — tellurion-analytics
 
-分析服务：基准 / 归因 / 敏感性 / 蒙特卡洛。**纯函数、只读**——不持有状态、不写业务表。
+## 1. 定位
 
-状态：**预留（S0 占位，触发式启动）——尚未启动，无实现**
+分析服务：基准 / 归因 / 敏感性 / 蒙特卡洛。**纯函数、只读**。
 
-## 依赖方向（编译器强制）
+它出仓的理由不是"计算重"（core 也能算），而是这些分析**互相独立、可并行、结果可缓存**，且天然是"给报告用的"，不进入决策热路径。
+
+## 2. 分层
 
 ```
-contracts + kit
+上游只读输入（结果 / 基准 / 因子值）
+        ↓
+   计算层（纯函数 + 显式 seed）
+        ├── 同步：metrics · benchmark · attribution · correlation
+        └── 异步：sensitivity · montecarlo（job）
+        ↓
+   analysis.reports / _benchmarks / _sensitivity_runs / _mc_runs / _attribution
+```
+
+## 3. 组件职责
+
+| 组件 | 职责 | 不做 |
+|---|---|---|
+| 指标 | 绩效指标（补齐收益类） | 不改上游已算的值 |
+| 基准 | 超额 / IR / 跟踪误差 | 不抓行情 |
+| 归因 | Brinson / 因子归因 | 不做因子研究 |
+| 敏感性 / 蒙特卡洛 | 网格与分布（异步、seed 显式） | 不读系统时钟做随机 |
+
+## 4. 三份契约（功能的边界就在这三份文件里）
+
+| 维度 | 文件 | 回答什么问题 |
+|---|---|---|
+| 数据形状 | [`db-schema.md`](db-schema.md) | 本仓拥有哪些表？谁能写？ |
+| 接口形状 | [`api-schema.md`](api-schema.md) | 对外暴露什么？错误码与幂等怎么做？ |
+| 流向与顺序 | [`dataflow.md`](dataflow.md) | 数据怎么流？哪里 fail-closed？ |
+
+## 5. 依赖方向
+
+```
+contracts（结果 DTO）+ kit（logging/http/db/statistics）
         ↑
-tellurion-analytics  ──(只读 DTO 进 / 指标出)──▶  core / ui
+tellurion-analytics ──(只读)──► core / run（结果）
+        └──(只读)──► tellurion-data（基准、因子值）
 ```
 
-- 箭头 = import 方向。**不允许反向**，也不允许成环 —— 反向 import 应当**编译失败**，这是判据不是口号。
-- 跨仓只认版本号：`tellurion-analytics` 以需要的版本出现在下游 `go.mod`。
+## 6. 关键决策
 
-## 边界表
+- [`adr/0001-纯函数只读.md`](adr/0001-纯函数只读.md)
 
-| | 内容 |
-|---|---|
-| 允许 | 基准比较、归因分解、敏感性、蒙特卡洛等只读计算；接受数据集快照 hash 作为输入（可复现） |
-| 禁止 | 写任何业务表（只读是硬边界）；持有跨请求状态；import core 的实现包；自己做数据抓取（那是 data 服务） |
+## 7. 非目标（明确不做）
 
-## 关键约束
+- 不做数据抓取
+- 不做回测
+- 不做因子研究
+- 不做实时分析
 
-1. **单仓可构建**：`go build ./...` / `go vet ./...` / `go test ./...` 不依赖任何兄弟目录。
-2. **无 `replace`**：指向仓外的 `replace` 一律不接受（CI 会查）。
-3. **无 `go.work` 入库**：本地联调可以建，提交即错。
-4. **纯函数**：同一输入必须同一输出；不许读时钟、不许读随机（种子显式传入）。
+## 8. 分期与状态
 
-## 未决 / 待定
-
-- 四个能力谁先上线按使用频率定，未裁决。
+| 阶段 | 内容 | 状态 |
+|---|---|---|
+| X4a | metrics + benchmark（同步） | ⬜ |
+| X4b | attribution（Brinson / 因子） | ⬜ |
+| X4c | sensitivity + montecarlo（异步 + seed） | ⬜ |
+| X4d | 报告导出（html / csv / pdf） | ⬜ |
