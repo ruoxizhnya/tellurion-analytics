@@ -18,7 +18,7 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 | `analysis.benchmarks` | 基准序列**登记**（代码、来源、hash） | 待建（基准行情本体归数据服务，此处只存引用） |
 | `analysis.sensitivity_runs` | 参数敏感性网格结果 | 待建 |
 | `analysis.mc_runs` | 蒙特卡洛 / bootstrap 批次（**`seed` 必填**） | 待建 |
-| `analysis.attribution` | 归因结果（Brinson / 因子） | 待建，与 `quant.ic_analysis` / `factor_returns` 区分：那是因子研究，这是**回测结果归因** |
+| `analysis.attribution` | 归因结果（Brinson / 因子） | 待建，与 `ic_analysis` / `factor_returns` 区分：那是因子研究，这是**回测结果归因** |
 
 **只读输入**：回测结果（`run` / 内核输出）、基准行情（数据服务）、因子值（数据服务）。**本仓不写它们的表。**
 
