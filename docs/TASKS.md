@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-21
-verified-by: 任务台账批量重分布（X 线单展开：QT-43 迁入）
+last-verified: 2026-10-22
+verified-by: M8 接口对表落盘（QT-43 前置 ② 完成）
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -20,6 +20,9 @@ verified-by: 任务台账批量重分布（X 线单展开：QT-43 迁入）
 ### QT-43 · X4 分析服务（基准 / 归因 / 敏感性 / 蒙特卡洛）[P1] ⬜
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「五、X 线」迁入（任务台账批量重分布：X 线单展开到各服务仓为正式六字段单，「占位仓不写正式任务单」旧约定同时作废）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
+>
+> **M8 前置完成（2026-10-22）**：接口对表见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9。开工前先读 §9.1 的六条前置事实——结果读取面无 K9-correct 持久读路径（F1）、Brinson / 因子归因缺 holdings / 暴露输入（F2）、sensitivity 依赖 QT-44（F3）、基准面依赖 X1b（F4）、指标不得重算（F5）、`seed=0` 不等于 time-based（F6）。另：② 里「benchmark/attribution 仅一行注释」经实测订正——设计引的那行其实是 cache warming 注释，BE-05/BE-06 生产代码 **0 命中**（§9.1「零实现核对」）。本单**仍 ⬜**：对表是开工前置，不是实现；R1 / R2 / R3 未落地前 X4a / X4b / X4c 各自阻塞。
+> 对表自检（2026-10-22）：35 条 core `path:line` 按 HEAD `075fdcb` 逐条命中；C 组 8 端点 / 13 错误码与 `api-schema.md` 双向一致；破坏验证三腿（改错行号 / 删一行端点 / 删一个错误码）各自红，还原后绿。
 
 - **① 目标**：补齐 BE-05/BE-06 的真实缺口，且分析只读 run 结果、零 import 引擎。
 - **② 上下文**：`analytics-service-design.md`（D21）；回测族 grep benchmark/attribution 仅一行注释；MC/bootstrap 全无；`mc_runs.seed` 必填。
@@ -31,7 +34,10 @@ verified-by: 任务台账批量重分布（X 线单展开：QT-43 迁入）
 
 ---
 
-> **⚠️ 开工前置（refactor-plan-review M5/M8，2026-10-20 登记）**：本表任何单开工前，必须先过 core `tellurion:docs/TASKS.md`「五、X 线」的**公共前置**两条：① 建仓/升格前先与 ADR-027 §2 对账（12 仓是上限/当前规划，不是承诺终态）；② 本仓设计文档先写「**接口对表**」小节（签名 + 错误语义 + 版本策略，模板见 `tellurion:docs/design/qt-decoupling/target-module-topology.md` UnifiedDataPoint 节），**未对表不开工**。正文以彼处为准，此处只留指针、不镜像。
+> **开工前置（refactor-plan-review M5/M8，2026-10-20 登记；2026-10-22 更新执行状态）**：本表任何单开工前，必须先过 core `tellurion:docs/TASKS.md`「五、X 线」的**公共前置**两条：
+> ① **M5 已结案（2026-10-21）** → `tellurion:docs/design/qt-decoupling/repo-inventory.md` §1.2：**六仓 ≠ 六进程**，本仓今天不升格容器；X4a 的纯函数迁移不需要容器，C 组 HTTP 面是升格时的目标形状。
+> ② **M8 接口对表已落（2026-10-22）** → 本仓 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9（模板 = `tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §4.1；**本行原指的 `target-module-topology.md` UnifiedDataPoint 节是幻影引用，已订正**）。
+> 正文以 core 彼处为准，此处只留指针、不镜像。
 
 ## 施工序（候选单，开工前必须展开成六字段）
 
@@ -44,7 +50,7 @@ verified-by: 任务台账批量重分布（X 线单展开：QT-43 迁入）
 | X4a | metrics + benchmark（同步，只读上游） | `QT-43` | 本仓立项 |
 | X4b | attribution（Brinson / 因子） | `QT-43` | X4a |
 | X4c | sensitivity + montecarlo（异步 job，`seed` 必填） | `QT-43` | X4a |
-| X4d | 报告导出（html / csv / pdf） | `QT-43` | X4b |
+| X4d | 报告导出（html / csv；**pdf 未定**，见 `ARCHITECTURE.md` §9.7 R5） | `QT-43` | X4b |
 
 ## 二、跨仓指针（不在本仓，勿双写）
 

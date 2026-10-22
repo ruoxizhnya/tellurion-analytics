@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-20
-verified-by: 功能边界固化（三份契约：db / api / dataflow）
+last-verified: 2026-10-22
+verified-by: M8 接口对表（QT-43 前置 ②）
 ---
 
 # DB Schema — tellurion-analytics
@@ -21,6 +21,8 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 | `analysis.attribution` | 归因结果（Brinson / 因子） | 待建，与 `ic_analysis` / `factor_returns` 区分：那是因子研究，这是**回测结果归因** |
 
 **只读输入**：回测结果（`run` / 内核输出）、基准行情（数据服务）、因子值（数据服务）。**本仓不写它们的表。**
+
+> **目标键与写入语义见** `ARCHITECTURE.md` §9.5（M8 对表）：`analysis.reports` 以 `report_id` 为 PK、`(run_id, analysis_type, params_hash, input_hash, seed, metrics_version)` 唯一；`analysis.mc_runs.seed` NOT NULL；`analysis.benchmarks` 的 `adjustment_basis` 与 `dataset_hash` 进登记身份。本文件仍是 **DDL 唯一真相源**，X4a 落地时按 §9.5 补列。
 
 ## 2. 只读输入（不属于本仓，禁止写入）
 

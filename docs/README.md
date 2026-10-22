@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-20
-verified-by: 功能边界固化（三份契约：db / api / dataflow）
+last-verified: 2026-10-22
+verified-by: M8 接口对表（QT-43 前置 ②）
 ---
 
 # 文档导航 — tellurion-analytics
@@ -18,6 +18,7 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 | 确认"这个功能到底归不归我" | [`ARCHITECTURE.md`](ARCHITECTURE.md) 的定位与「三份契约」 |
 | 改表 / 加列 | [`db-schema.md`](db-schema.md) |
 | 加 / 改接口 | [`api-schema.md`](api-schema.md) |
+| 查某个 port / DTO / 端点的签名、错误语义、版本策略 | [`ARCHITECTURE.md`](ARCHITECTURE.md) §9「接口对表」 |
 | 改数据流向或顺序 | [`dataflow.md`](dataflow.md) |
 | 想知道"为什么这样设计" | [`adr/`](adr/README.md) |
 | 要做删档 / 迁移 / 流程变更 | [`odr/`](odr/README.md) |
@@ -27,7 +28,7 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 
 | 文件 | 职责 | 谁维护 |
 |---|---|---|
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 高层设计：分层、组件、依赖方向、非目标 | 改结构的人 |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 高层设计：分层、组件、依赖方向、非目标；**§9 接口对表（M8）** | 改结构 / 改接口的人 |
 | [`db-schema.md`](db-schema.md) | **表结构唯一真相源** + 所有权声明 | 改表的人 |
 | [`api-schema.md`](api-schema.md) | **对外接口唯一真相源** + 错误码 / 幂等 / 兼容 | 改接口的人 |
 | [`dataflow.md`](dataflow.md) | 数据流向、时序、fail-closed 点、不变量 | 改链路的人 |
@@ -41,7 +42,7 @@ verified-by: 功能边界固化（三份契约：db / api / dataflow）
 | 代码变更 | 必须更新的文档 |
 |---|---|
 | 建表 / 加列 / 加索引 / 改主键 | `db-schema.md`（+ 结构级变更立 ADR） |
-| 新增 / 修改 / 废弃接口 | `api-schema.md`（错误码与幂等两节要一起看） |
+| 新增 / 修改 / 废弃接口 | `api-schema.md`（错误码与幂等两节要一起看）+ `ARCHITECTURE.md` §9（签名 / DTO / 版本策略） |
 | 新增数据源、改聚合口径、改顺序 | `dataflow.md` |
 | 改分层、依赖方向、模块职责 | `ARCHITECTURE.md` + 一条 ADR |
 | 删档 / 迁移 / 换 CI / 换工具链 | 一条 ODR |
