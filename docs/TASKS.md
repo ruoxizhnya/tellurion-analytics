@@ -22,7 +22,7 @@ verified-by: M8 接口对表落盘（QT-43 前置 ② 完成）
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「五、X 线」迁入（任务台账批量重分布：X 线单展开到各服务仓为正式六字段单，「占位仓不写正式任务单」旧约定同时作废）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
 >
 > **M8 前置完成（2026-10-22）**：接口对表见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9。开工前先读 §9.1 的六条前置事实——结果读取面无 K9-correct 持久读路径（F1）、Brinson / 因子归因缺 holdings / 暴露输入（F2）、sensitivity 依赖 QT-44（F3）、基准面依赖 X1b（F4）、指标不得重算（F5）、`seed=0` 不等于 time-based（F6）。另：② 里「benchmark/attribution 仅一行注释」经实测订正——设计引的那行其实是 cache warming 注释，BE-05/BE-06 生产代码 **0 命中**（§9.1「零实现核对」）。本单**仍 ⬜**：对表是开工前置，不是实现；R1 / R2 / R3 未落地前 X4a / X4b / X4c 各自阻塞。
-> 对表自检（2026-10-22）：35 条 core `path:line` 按 HEAD `075fdcb` 逐条命中；C 组 8 端点 / 13 错误码与 `api-schema.md` 双向一致；破坏验证三腿（改错行号 / 删一行端点 / 删一个错误码）各自红，还原后绿。
+> 对表自检（2026-10-22，基线 `dbe4c68`）：35 条 core `path:line` 按 HEAD 逐条命中；C 组 8 端点 / 13 错误码与 `api-schema.md` 双向一致；破坏验证三腿（改错行号 / 删一行端点 / 删一个错误码）各自红，还原后绿。
 
 - **① 目标**：补齐 BE-05/BE-06 的真实缺口，且分析只读 run 结果、零 import 引擎。
 - **② 上下文**：`analytics-service-design.md`（D21）；回测族 grep benchmark/attribution 仅一行注释；MC/bootstrap 全无；`mc_runs.seed` 必填。

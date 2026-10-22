@@ -73,22 +73,22 @@ tellurion-analytics ──(只读)──► core / run（结果）
 ## 9. 接口对表（M8 前置 · ✅ 2026-10-22）
 
 > **本节是什么**：`tellurion:docs/TASKS.md`「五、X 线」公共前置 ② 要求的**接口对表本体**（模板 = `tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §4.1）。逐个 port / DTO / endpoint 列 **签名 + 错误语义 + 版本策略**；缺一列就是没对完表。
-> **实测基线**：core `075fdcb`（2026-10-22）。行号一律取 `git show HEAD:<path>`——实测时 core 工作区有并发会话的**未提交**改动（QT-63），本表不引用它们。复核：`git -C ../tellurion show HEAD:<path> | sed -n '<line>p'`。
+> **实测基线**：core `dbe4c68`（2026-10-22；QT-63 已落）。行号一律取 `git show HEAD:<path>`。复核：`git -C ../tellurion show HEAD:<path> | sed -n '<line>p'`。
 > **列口径**：「今天」= 源码实测；「契约位」= S1（QT-05）后 contracts 的落点，写 `core-only` 表示今天**不满足** contracts ADR-0001 ① 的「≥2 个仓使用」判据（不是永久留 core）；「版本策略」按 QT-19 的 MAJOR / MINOR / PATCH 判定。
 > **M5 口径**：六仓 ≠ 六进程（`tellurion:docs/design/qt-decoupling/repo-inventory.md` §1.2）。本仓今天不升格容器；**X4a 的纯函数迁移不需要容器**，C 组 HTTP 面是升格时的目标形状。
 
 ### 9.1 六条前置事实（每条都会改变施工判断）
 
-| # | 事实 | 取证（core `075fdcb`） | 对施工的后果 |
+| # | 事实 | 取证（core `dbe4c68`） | 对施工的后果 |
 |---|---|---|---|
 | F1 | **结果读取面没有 K9-correct 的持久读路径；`backtest_jobs.result` 有两种不兼容编码。** | 异步路径：invalid 走 `UpdateJobFailed`、**结果体直接丢弃**（`pkg/backtest/job/job.go:490-505`），有效结果才 marshal `domain.BacktestResult`（**无 status**，`pkg/backtest/job/job.go:518`）。同步路径：`SaveSyncResult` 把完整 `contracts.BacktestResponse`（**有 status**）写进同一列（`pkg/backtest/job/job.go:709-741`）。`GET /api/backtest/:id` 返回的是 **job 行**（`cmd/analysis/handlers_backtest.go:160-172`）；`lookupBacktestResponse` 要求 `job.Status=="completed"` 再按 `BacktestResponse` 反序列化（`cmd/analysis/handlers_backtest.go:357-377`）⇒ 异步行的 status 为空、invalid 行直接 404。 | X4a **不能**按今天的读路径安全开工；解析错误串 `"backtest produced an invalid run: ..."` 来还原三值是**禁止项**。需先裁 **R1**：(a) core job 层把 invalid 落成 status=invalid + 保留结果体，或 (b) `run`/artifact 读取面（QT-44 / QT-63）提供 K9-correct 读取。**R1 落地前 QT-43 ⛔。** |
 | F2 | **Brinson / 因子归因的输入不在结果 DTO 里。** | `domain.BacktestResult`（`pkg/domain/backtest.go:5-39`）只有聚合的 `PortfolioValues`（`Date / TotalValue / Cash / Positions`，`pkg/domain/backtest.go:41-45`）与 `Trades`——**没有逐标的持仓快照、没有因子暴露**。`BacktestState.Tracker` / `TargetPositions` 只在内存（`pkg/backtest/state/state.go:30-75`），不落结果。 | Brinson 需要**期末持仓 artifact**；因子归因需要**逐期因子值/暴露**。两者都是新的读取输入（**R2**）。**不许**用成交明细倒推持仓（T+1、部分成交、手数、多空都会让 `trades ≠ positions`）。 |
 | F3 | **Sensitivity 不是纯函数：它要再跑回测，而本仓「不做回测」。** | 设计 §4 说异步 job；job / batch / walkforward 的 owner 是 X5（`tellurion-orchestration:docs/TASKS.md` QT-44）；`pkg/backtest/batch` + `walkforward` 仍在 core；contracts 仓 `JobQueue` **零命中**。 | X4c 的 sensitivity 必须把参数网格**提交给 X5** 再读结果——依赖 QT-44（**R3**）。只有蒙特卡洛 / bootstrap 是纯函数，可以先落。**不许**在本仓内起回测循环。 |
 | F4 | **基准序列的粗粒度读取面尚未建；口径必须先钉住。** | 目标 `/datasets/resolve` + `/datasets/{hash}` 属 X1b（`tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §4.1 C 组），今天 data-service 只有逐 symbol 面（同文 D 组）；`docs/dataflow.md` §3 已把「全收益 vs 价格」列为超额失真的失败点。 | X4b 的基准输入依赖 X1b，或一个**显式** interim adapter（读逐 symbol OHLCV + 登记 `adjustment_basis`）。本仓**不抓行情**。`analysis.benchmarks` 只登记 `{code, source, adjustment_basis, dataset_hash}`（**R4**）。 |
 | F5 | **结果里已有的指标不得重算**（否则同一指标有两个值）。 | `BacktestResult` 已有 Sharpe / Sortino / MDD / Calmar / 交易计数；`metrics.CalculateMetrics` 返回**另一个** `domain.RiskMetrics`，其中也含 Sharpe / Sortino / MDD（`pkg/backtest/metrics/performance.go:13`）。红线见 `docs/db-schema.md` §3-3。 | `metrics` 响应必须**分区**：`from_result`（权威，原样）与 `computed`（补算：Volatility / Beta / VaR95 / CVaR95）+ `metrics_version` + `sources`。禁止用 `RiskMetrics.SharpeRatio` 覆盖结果里的 Sharpe。验收：同一 run 的 Sharpe 与结果**逐位一致**。 |
-| F6 | **seed 的零值语义与引擎不同。** | 引擎 `Config.Seed == 0` ⇒ time-based（`pkg/backtest/engine.go:35`、`pkg/backtest/engine.go:309-313`）；`analysis.mc_runs.seed` NOT NULL（`docs/db-schema.md` §1/§3）。 | 本仓 `seed` 是 `*int64`：缺省 / null ⇒ `400 seed_required`；**`0` 是合法的显式种子**（`rand.NewSource(0)`，可复现），**不套用**引擎「0=time-based」。PRNG 冻结为 `math/rand.New(rand.NewSource(seed))`（与引擎同源；换算法 = breaking）。 |
+| F6 | **seed 的零值语义与引擎不同。** | 引擎 `Config.Seed == 0` ⇒ time-based（`pkg/backtest/engine.go:35`、`pkg/backtest/engine.go:309-314`）；`analysis.mc_runs.seed` NOT NULL（`docs/db-schema.md` §1/§3）。 | 本仓 `seed` 是 `*int64`：缺省 / null ⇒ `400 seed_required`；**`0` 是合法的显式种子**（`rand.NewSource(0)`，可复现），**不套用**引擎「0=time-based」。PRNG 冻结为 `math/rand.New(rand.NewSource(seed))`（与引擎同源；换算法 = breaking）。 |
 
-**零实现核对（③-② 的「真实缺口」）**：设计 §2 引的 `engine.go` 第 1059 行只有一行注释——HEAD 对应位置是 **cache warming** 注释（`pkg/backtest/engine.go:1122`），与基准 / 归因无关。生产代码 grep `Brinson|TrackingError|InformationRatio|MonteCarlo|monte_carlo` = **0 命中**；唯一 `sensitivity` 命中是 `pkg/strategy/options/types.go:67` 的期权 Greeks 注释。⇒ BE-05 / BE-06 是**真缺口**，不是「已实现只差搬」；X4a~X4c 是新实现，不是搬迁。
+**零实现核对（③-② 的「真实缺口」）**：设计 §2 引的 `engine.go` 第 1059 行只有一行注释——HEAD 对应位置是 **cache warming** 注释（`pkg/backtest/engine.go:1149`），与基准 / 归因无关。生产代码 grep `Brinson|TrackingError|InformationRatio|MonteCarlo|monte_carlo` = **0 命中**；唯一 `sensitivity` 命中是 `pkg/strategy/options/types.go:67` 的期权 Greeks 注释。⇒ BE-05 / BE-06 是**真缺口**，不是「已实现只差搬」；X4a~X4c 是新实现，不是搬迁。
 
 ### 9.2 A 组 · 纯函数与 port
 
