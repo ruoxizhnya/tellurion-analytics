@@ -3,9 +3,9 @@ package analysis
 // migrationStatements 是本仓 DDL 的唯一真相（取向 ①：Go 数组 + 启动时按序执行、
 // 幂等、无版本表，与 core / risk 一致）。
 //
-// 每条都必须能在空库上一次跑完，且可重入。执行入口（PG 连接 + 启动时跑）尚未
-// 接线：当前只有 Memory Store。结构变更必须同步 docs/db-schema.md，结构级变更
-// 还要立 ADR。
+// 每条都必须能在空库上一次跑完，且可重入。执行入口是 PG.Migrate（由
+// cmd/analyticsservice 在启动时调用）；Memory Store 只用于测试与无库本地装配。
+// 结构变更必须同步 docs/db-schema.md，结构级变更还要立 ADR。
 //
 // 注意：reports 的唯一键用 PG15+ 的 NULLS NOT DISTINCT —— 默认唯一约束不拦
 // NULL 重复，seed 为 NULL 的非 MC 报告会重复落行。
@@ -69,6 +69,28 @@ var migrationStatements = []string{
 
 	`CREATE INDEX IF NOT EXISTS reports_run_type_idx
 		ON analysis.reports (run_id, analysis_type)`,
+
+	// completed 报告一旦落库即不可变：应用层（PG.PutReport）先判断并返回
+	// ErrReportConflict；这条触发器是绕过应用层时的兜底（直接 UPDATE 也会被拒）。
+	// 只前滚：改这段只能新增语句，不改上面已有语句。
+	`CREATE OR REPLACE FUNCTION analysis.reports_completed_immutable()
+		RETURNS trigger
+		LANGUAGE plpgsql
+		AS $fn$
+		BEGIN
+			IF OLD.status = 'completed' THEN
+				RAISE EXCEPTION 'analysis.reports: completed report % is immutable', OLD.report_id
+					USING ERRCODE = '55000';
+			END IF;
+			RETURN NEW;
+		END
+		$fn$`,
+
+	`DROP TRIGGER IF EXISTS reports_completed_immutable ON analysis.reports`,
+
+	`CREATE TRIGGER reports_completed_immutable
+		BEFORE UPDATE ON analysis.reports
+		FOR EACH ROW EXECUTE FUNCTION analysis.reports_completed_immutable()`,
 }
 
 // Migrations 返回迁移语句的副本（调用方不能改到内部数组）。

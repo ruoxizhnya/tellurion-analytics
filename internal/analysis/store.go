@@ -9,8 +9,9 @@ import (
 
 // Store 是本仓的持久化端口（analysis.* 的唯一 owner）。
 //
-// PG 实现未落（docs/TASKS.md QT-43 施工记录）：当前只有 Memory，用于测试与本地装配。
-// 端口语义按 DDL 的约束设计：completed 报告不可变；residual / seed 必须落库。
+// 两个实现：PG（生产；docs/TASKS.md QT-43 施工 ② 接线）与 Memory（测试 / 无库
+// 本地装配）。端口语义按 DDL 的约束设计：completed 报告不可变；residual /
+// seed 必须落库。
 type Store interface {
 	GetReport(ctx context.Context, reportID string) (Report, error)
 	PutReport(ctx context.Context, report Report) error

@@ -6,7 +6,7 @@
 
 分析服务：基准 / 归因 / 敏感性 / 蒙特卡洛。**纯函数、只读上游**——不持有跨请求状态、不写任何上游表；但**拥有自己的结果表** `analysis.*`（reports / benchmarks / sensitivity_runs / mc_runs / attribution，见 `docs/db-schema.md`）。
 
-**状态**：已启动（2026-10-23，QT-43 施工 ①）——X4a~X4d 的代码与测试已落盘，`go build/vet/test` 全绿；**上游端口与 PG 尚未接线**，进程用 Memory Store，未接线端口 fail-closed 成 `503 dependency_unavailable`。现状详见 `docs/ARCHITECTURE.md` §9.8，未落项见 `docs/TASKS.md` QT-43 施工记录。
+**状态**：已启动（2026-10-23，QT-43 施工 ①）——X4a~X4d 的代码与测试已落盘，`go build/vet/test` 全绿；**PG Store 与上游读取端口已于 2026-10-24（施工 ②）接线**，未配置的上游端口仍 fail-closed 成 `503 dependency_unavailable`。现状详见 `docs/ARCHITECTURE.md` §9.8，未落项见 `docs/TASKS.md` QT-43 施工记录（sensitivity 逐点回填等 X5b）。
 
 **今天的实现**：本仓自有 `internal/analysis`（纯函数 + 端口 + Memory Store + DDL）、`internal/httpapi`（8 端点）、`cmd/analyticsservice`。上游计算口径的参考实现仍在 core（`core:pkg/backtest/metrics`、`core:pkg/backtest/reporting`），本仓**只对照公式、不 import**。
 
@@ -17,6 +17,10 @@ go build ./...
 go vet ./...
 go test ./...
 ```
+
+> PG 集成与端到端用例是 opt-in（CI 无库时自动 skip）：设置
+> `ANALYTICS_TEST_DSN='postgres://postgres:postgres@127.0.0.1:5432/tellurion_analytics_test?sslmode=disable'`
+> 后再跑一次 `go test ./... -count=1`。
 
 - 这三条是 R1/R2 的判据：**单独 checkout 就能绿**。
 - 若某一步需要别的仓的源码目录才过，那是**边界画错了**——停下来修边界，**不要**加 `replace ../xxx` 绕过。
@@ -49,8 +53,9 @@ go test ./...
 |---|---|---|
 | `github.com/ruoxizhnya/tellurion-contracts` | 未引入（待 S2 后 `v0.1.0`） | 契约仓的 `analysis` 包未发布；本仓暂以 `internal/analysis/model.go` 的本地 DTO 镜像冻结形状（只消费、不输出） |
 | `github.com/ruoxizhnya/tellurion-kit` | 未引入（待 S2 后 `v0.1.0`） | 日志 / 统计 / HTTP；当前只用标准库 |
+| `github.com/jackc/pgx/v5` | `v5.11.0` | `analysis.*` 的 PG 连接池与迁移执行（`internal/analysis/pgstore.go`）；选 pgx 而非 `database/sql` 驱动是为了直接拿 `pgxpool` 与 `pgtype` 的 NULL 语义 |
 
-> **今日 `go.mod` 零 `require`**（2026-10-23）。这是临时状态，不是"以后也不依赖"：契约发布后按 `docs/ARCHITECTURE.md` §9.8 迁走本地镜像。
+> `go.mod` 现在只有上面这一条直接依赖（2026-10-24，施工 ②）。契约发布后按 `docs/ARCHITECTURE.md` §9.8 迁走本地镜像。
 
 > 跨仓依赖**只认版本号**（伪版本或 tag），不认源码路径。契约变更走 `tellurion-contracts` 的发布，不走"顺手改一下"。
 

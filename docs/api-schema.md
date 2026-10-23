@@ -1,20 +1,20 @@
 ---
 status: active
-last-verified: 2026-10-23
-verified-by: QT-43 施工 ①（X4a~X4d 代码落盘，`internal/analysis` + `internal/httpapi`）
+last-verified: 2026-10-24
+verified-by: QT-43 施工 ②（PG Store + 上游读取适配器接线 + 真库 E2E）
 ---
 
 # API Schema — tellurion-analytics
 
-> **实现状态（2026-10-23）**：8 个端点全部在 `internal/httpapi` 落盘，计算面在 `internal/analysis`（纯函数）；**但上游端口尚未接线**——`ResultReader` / `BenchmarkReader` / holdings / 因子暴露 / QT-44 队列在 `cmd/analyticsservice` 里都是 nil。
-> 未接线的端口一律 fail-closed 成 `503 dependency_unavailable`，**不伪造结果、不返回空报告**。因此本文件仍是**契约真相源**：端点形状按此冻结，可用性取决于接线进度（`docs/TASKS.md` QT-43 施工记录「未落项」）。
+> **实现状态（2026-10-24）**：8 个端点全部在 `internal/httpapi` 落盘；计算面在 `internal/analysis`（纯函数）；**PG Store、启动迁移与三个上游读取适配器已接线**（`cmd/analyticsservice` 的 `-dsn` / `-core-url` / `-data-url` / `-artifact-url`，各自也可用同名 `ANALYTICS_*` 环境变量）。
+> **未配置的端口**仍 fail-closed 成 `503 dependency_unavailable`，**不伪造结果、不返回空报告**。sensitivity 的 job 队列（G7/X5b）仍未接，故该端点保持 503。可用性取决于部署配置（`docs/TASKS.md` QT-43 施工 ② 记录）。
 
 > **契约地位**：HTTP，**全部只读语义**（POST 表示"提交计算"，不改上游）。重计算走异步 job。
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
 > 跨仓消费方（core / agent / ui / 其他服务）按本文件编码，**不读本仓实现**。
 > **请求 / 响应形状**：本文只冻结**路径、错误码、幂等与兼容**；逐端点的目标签名、DTO 字段与版本策略见 `ARCHITECTURE.md` §9（M8 接口对表），两处必须同步改，不复制形状。
 > **鉴权**：按 core `QT-50 ④` 统一（JWT + RBAC），默认 fail-closed；本仓不另定鉴权契约。**当前未接线鉴权**（`ARCHITECTURE.md` §9.7 R6），进程只监听回环地址。
-> **前置现状**：sensitivity 依赖 X5 的 job 队列（QT-44，R3）、Brinson 依赖 holdings artifact（R2）、基准序列依赖 X1b 或 interim adapter（R4）——三处**代码已就位、依赖未落地**，缺依赖即 503，不降级出假报告。
+> **前置现状**：sensitivity 的 job 队列依赖 G7/X5b（`tellurion-orchestration` QT-44，**未落**，该端点 503）；结果读取走 R1 落地前的 interim 适配器（无 `status` 的异步结果 fail-closed）；基准走 X1b（已落）；holdings / 因子暴露走 interim artifact 面（R2 形状未冻结）。缺依赖即报错，不降级出假报告。
 
 ## 1. 接口面
 
@@ -55,7 +55,7 @@ verified-by: QT-43 施工 ①（X4a~X4d 代码落盘，`internal/analysis` + `in
 | 上游结果不完整（缺曲线 / holdings / 因子暴露） | 409 `run_result_incomplete` | 拒算，不猜；明细点名缺哪个输入 |
 | 基准已登记但取不到序列 | 409 `benchmark_data_unavailable` | 不回落别的基准 / 不拿价格指数冒充全收益 |
 | 报告未完成（导出 / 读取报告体） | 409 `report_not_ready` | 轮询 `GET /reports/{id}` |
-| 依赖端口未接线（上游读取面 / QT-44 队列 / 基准读取面） | 503 `dependency_unavailable` | **不降级**：不伪造结果、不返回空报告、不回落别的数据源；接线后重试 |
+| 依赖端口未配置 / 未接线（QT-44 队列；或部署未给上游 URL） | 503 `dependency_unavailable` | **不降级**：不伪造结果、不返回空报告、不回落别的数据源；补齐配置或接线后重试 |
 
 **原则**：宁可报错，也不产出一份"看起来正常"的错误报告。`invalid` / `failed` / `incomplete` 三者**分开报**——它们对调用方的处置完全不同（换 run / 修上游 / 等数据）。`503` 是**部署态**问题（代码在、依赖没接），与业务错误分开，调用方应重试或联系运维，**不应**把它当"该 run 没数据"。
 

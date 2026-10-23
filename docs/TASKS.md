@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-23
-verified-by: QT-43 施工 ①（X4a~X4d 代码落盘并提交）
+last-verified: 2026-10-24
+verified-by: QT-43 施工 ②（PG Store / 启动迁移 / 上游读取端口接线 + 真库端到端）
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -42,7 +42,7 @@ verified-by: QT-43 施工 ①（X4a~X4d 代码落盘并提交）
 - HTTP：8 端点 + 严格解码 + 13 词错误码（含 503 `dependency_unavailable`）；`cmd/analyticsservice` 回环进程入口。
 - 测试：`internal/analysis/*_test.go` 与 `internal/httpapi/api_test.go`，覆盖三值、seed 规则、幂等、恒等式、30 点边界、导出确定性、wire code。
 
-**未落（后续施工项）**
+**未落（后续施工项；2026-10-24 施工 ② 的结清情况见下一条记录）**
 
 1. **PG Store + 启动迁移执行**：`ddl.go` 已定稿，缺连接装配与启动执行（`Memory` 暂替）。
 2. **上游读取端口接线**：`ResultReader`（依赖 R1 的 K9-correct 读取面）、`BenchmarkReader`（R4 / X1b 或 interim adapter）、`HoldingsProvider` / `FactorExposureProvider`（R2 artifact 形状冻结后迁 contracts）。
@@ -53,6 +53,35 @@ verified-by: QT-43 施工 ①（X4a~X4d 代码落盘并提交）
 
 **验收现状**：⑤ 的三条（同 run + 同 seed 两次结果一致、归因分项和 ≈ 总收益、缺 seed 拒绝）已在单测层面成立；**端到端**验收（真实 run + 真实基准 + 真实 DB）待上述 1/2 接线后才可执行，故本单保持 🔶。
 
+#### 施工记录（2026-10-24，施工 ②：PG 与上游读取端口接线）
+
+**已落**
+
+1. **PG Store + 启动迁移**
+   - `internal/analysis/pgstore.go`：`OpenPG` / `PG.Migrate`（单事务按序执行 `Migrations()`，可重入）/ `Store` 五方法；语义与 Memory 对齐（completed 同键同内容 = no-op，异内容 = `ErrReportConflict`；pending/running 可推进）。
+   - `completed` 不可变：应用层先判断 + **DB 触发器** `reports_completed_immutable` 兜底（绕过程序直接 `UPDATE` 也被拒，SQLSTATE 55000）。理由与取舍见 `adr/0002-报告不可变由PG触发器兜底.md`。
+   - `cmd/analyticsservice`：`-dsn` / `ANALYTICS_DATABASE_DSN` 有值 → 连接 + 启动迁移 + PG Store；空值 → Memory（仅本地/测试，启动日志打 WARNING）。`CHAR(64)` 列读取用 `rtrim`，避免短值被空格污染。
+2. **上游读取端口**（`internal/upstream`；端口定义不变，只加适配器）
+   - `ResultReader`：`-core-url` / `ANALYTICS_CORE_URL` → `GET /api/backtest/{id}/report`。K9 三值原样映射；**缺 `status` 的异步结果一律 409 `run_result_incomplete`**，不解析错误串。R1 的专用 K9-correct 持久读面尚未落地，故这是 interim 适配器（`ARCHITECTURE.md` §9.7 R1）。
+   - `BenchmarkReader`：`-data-url` / `ANALYTICS_DATA_URL` → X1b `GET /datasets/resolve` + `GET /datasets/{hash}`；`adjustment` 按登记口径传入，回包 basis 不一致即 `benchmark_data_unavailable`（不用价格指数冒充全收益）。
+   - `HoldingsProvider` / `FactorExposureProvider`：`-artifact-url` / `ANALYTICS_ARTIFACT_URL` → interim artifact 面 `GET /runs/{id}/portfolio-snapshot`、`GET /runs/{id}/factor-exposures`；404 / 空体 → `run_result_incomplete` 并点名缺哪个输入。R2 的 owner / 形状未裁，DTO 仍是本地临时镜像，冻结后迁 contracts。
+   - 未配置 URL 的端口保持 nil，对应端点仍 503 —— fail-closed 语义未变。
+3. **真库端到端**
+   - 命令：`ANALYTICS_TEST_DSN='postgres://postgres:postgres@127.0.0.1:5432/tellurion_analytics_test?sslmode=disable' go test ./... -count=1`（PG 17.5）。
+   - 覆盖：同 run 两次 metrics 字节一致；同 run + 同 seed 两次 montecarlo 同一 `report_id` 且报告字节一致；缺 seed → 400 `seed_required`；因子归因 `Σcontributions + residual == total_return`（容差 `1e-8`）；Brinson `Σ分项 == total_return - benchmark_return`（同容差）；基准走 X1b；报告落 PG 后由**另一条连接**读回（排除进程内缓存）。
+   - 另：PG 集成用例覆盖迁移幂等、completed 不可变（含触发器直连验证）、seed 的 NULL vs 0、benchmark 最新登记、归因 / MC 的同键冲突。
+   - **破坏验证**：把 `ResultReader` 的缺 `status` 分支改成「当作 completed」→ `TestResultReader_K9Mapping/missing_status_fails_closed` 红（`want IncompleteError, got <nil>`）；用备份逐字节还原（文件 SHA-256 改前/还原后同为 `8EE5D88FED09EE50D66061E8FB1ACF9CD7A238937DCBD2B691EE255A30527FD3`）后同一用例绿。
+
+**未落（如实登记，不算完成）**
+
+1. **sensitivity 逐点回填**：`SensitivityQueue` 仍只提交；`analysis.sensitivity_runs.points` 与完成态推进依赖 G7 的 X5b（`tellurion-orchestration` QT-44：X5b 未做）。按派发要求「不到就停」，本次不预设载荷形状。
+2. **R1 的 K9-correct 持久读面**：core 侧尚未落地；当前适配器对同步结果可用、对无 `status` 的异步结果 fail-closed。R1 落地后只换 URL/路径，端口与 DTO 不变。
+3. **R2 artifact 形状与 owner**：wire 形状仍是本地临时镜像，未迁 contracts。
+4. **PDF 导出**：R5 未裁，只承诺 html / csv。
+5. **鉴权**：QT-50 ④ 未落；进程仍只监听回环。
+6. **契约迁移**：`tellurion-contracts` 的 `analysis` 包未发布，本地 DTO 镜像未迁走。
+
+**验收现状**：⑤ 三条判据已在**真库 E2E** 层成立（不再是仅单测）；本单保持 🔶 —— sensitivity 逐点回填、R1/R2 契约化、PDF、鉴权仍未落，不写成已完成。
 
 ---
 
