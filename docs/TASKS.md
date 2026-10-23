@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-22
-verified-by: M8 接口对表落盘（QT-43 前置 ② 完成）
+last-verified: 2026-10-23
+verified-by: QT-43 施工 ①（X4a~X4d 代码落盘并提交）
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -15,13 +15,13 @@ verified-by: M8 接口对表落盘（QT-43 前置 ② 完成）
 
 ## 一、本仓任务
 
-> **约定变更（2026-10-21）**：原「占位仓不写正式六字段任务单」作废——X 线任务单已展开为本仓正式任务（见下）。M5/M8 开工前置不变；实现仍未开工，开工前仍须过前置两条。
+> **约定变更（2026-10-21）**：原「占位仓不写正式六字段任务单」作废——X 线任务单已展开为本仓正式任务（见下）。M5/M8 开工前置不变。
 
-### QT-43 · X4 分析服务（基准 / 归因 / 敏感性 / 蒙特卡洛）[P1] ⬜
+### QT-43 · X4 分析服务（基准 / 归因 / 敏感性 / 蒙特卡洛）[P1] 🔶
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「五、X 线」迁入（任务台账批量重分布：X 线单展开到各服务仓为正式六字段单，「占位仓不写正式任务单」旧约定同时作废）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
 >
-> **M8 前置完成（2026-10-22）**：接口对表见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9。开工前先读 §9.1 的六条前置事实——结果读取面无 K9-correct 持久读路径（F1）、Brinson / 因子归因缺 holdings / 暴露输入（F2）、sensitivity 依赖 QT-44（F3）、基准面依赖 X1b（F4）、指标不得重算（F5）、`seed=0` 不等于 time-based（F6）。另：② 里「benchmark/attribution 仅一行注释」经实测订正——设计引的那行其实是 cache warming 注释，BE-05/BE-06 生产代码 **0 命中**（§9.1「零实现核对」）。本单**仍 ⬜**：对表是开工前置，不是实现；R1 / R2 / R3 未落地前 X4a / X4b / X4c 各自阻塞。
+> **M8 前置完成（2026-10-22）**：接口对表见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9。开工前先读 §9.1 的六条前置事实——结果读取面无 K9-correct 持久读路径（F1）、Brinson / 因子归因缺 holdings / 暴露输入（F2）、sensitivity 依赖 QT-44（F3）、基准面依赖 X1b（F4）、指标不得重算（F5）、`seed=0` 不等于 time-based（F6）。另：② 里「benchmark/attribution 仅一行注释」经实测订正——设计引的那行其实是 cache warming 注释，BE-05/BE-06 生产代码 **0 命中**（§9.1「零实现核对」）。~~本单仍 ⬜：对表是开工前置，不是实现；R1 / R2 / R3 未落地前 X4a / X4b / X4c 各自阻塞。~~（2026-10-23 订正：代码可按消费端端口先行落盘，R1/R2/R3 只决定「谁提供 reader」，不阻塞本仓——见下「施工记录」与 `ARCHITECTURE.md` §9.8。）
 > 对表自检（2026-10-22，基线 `dbe4c68`）：35 条 core `path:line` 按 HEAD 逐条命中；C 组 8 端点 / 13 错误码与 `api-schema.md` 双向一致；破坏验证三腿（改错行号 / 删一行端点 / 删一个错误码）各自红，还原后绿。
 
 - **① 目标**：补齐 BE-05/BE-06 的真实缺口，且分析只读 run 结果、零 import 引擎。
@@ -30,6 +30,28 @@ verified-by: M8 接口对表落盘（QT-43 前置 ② 完成）
 - **④ 约束与非目标**：纯函数 + 只读；不 import `pkg/backtest`；不在分析层做交易决策。
 - **⑤ 验收**：同一 run + 同一 seed 两次分析结果一致；归因分项和 ≈ 总收益（容差写明）；缺 seed 直接拒绝。
 - **⑥ 边界**：只做分析与指标；报表呈现归 UI 仓。
+
+#### 施工记录（2026-10-23，施工 ①：X4a~X4d 代码落盘）
+
+**已落**
+
+- 计算面：metrics / benchmark / attribution / montecarlo / correlation 五类纯函数 + 导出，口径与 core 同式；Brinson-Fachler 恒等式与因子归因 residual 用单测钉在 `1e-8`。
+- 报告身份：`report_id = hash(run_id, analysis_type, params_hash, input_hash, seed, metrics_version)`，域标签 `tellurion.analysis_report_id.v1`；同键重放字节一致。
+- 端口：`ResultReader` / `BenchmarkReader` / `HoldingsProvider` / `FactorExposureProvider` / `SensitivityQueue`（消费端定义，不 import 上游）。
+- Store：`Memory`（单锁 + 出库深拷贝 + `completed` 不可变）；DDL 5 表落 `internal/analysis/ddl.go`（`Migrations()` 副本）。
+- HTTP：8 端点 + 严格解码 + 13 词错误码（含 503 `dependency_unavailable`）；`cmd/analyticsservice` 回环进程入口。
+- 测试：`internal/analysis/*_test.go` 与 `internal/httpapi/api_test.go`，覆盖三值、seed 规则、幂等、恒等式、30 点边界、导出确定性、wire code。
+
+**未落（后续施工项）**
+
+1. **PG Store + 启动迁移执行**：`ddl.go` 已定稿，缺连接装配与启动执行（`Memory` 暂替）。
+2. **上游读取端口接线**：`ResultReader`（依赖 R1 的 K9-correct 读取面）、`BenchmarkReader`（R4 / X1b 或 interim adapter）、`HoldingsProvider` / `FactorExposureProvider`（R2 artifact 形状冻结后迁 contracts）。
+3. **sensitivity 逐点回填**：`SensitivityQueue` 只提交；`analysis.sensitivity_runs.points` 与完成态推进依赖 QT-44（R3）。
+4. **鉴权**：QT-50 ④ 统一面（R6）；当前进程仅回环监听。
+5. **PDF 导出**：R5 未裁，当前只承诺 html / csv。
+6. **契约迁移**：本地 DTO 镜像待 `tellurion-contracts` 发布 `analysis` 包后迁走。
+
+**验收现状**：⑤ 的三条（同 run + 同 seed 两次结果一致、归因分项和 ≈ 总收益、缺 seed 拒绝）已在单测层面成立；**端到端**验收（真实 run + 真实基准 + 真实 DB）待上述 1/2 接线后才可执行，故本单保持 🔶。
 
 
 ---

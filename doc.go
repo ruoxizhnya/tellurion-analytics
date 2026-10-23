@@ -1,8 +1,13 @@
-// Package analytics 是 tellurion-analytics 的占位包。
+// Package analytics 是 tellurion-analytics 的根包（无实现）。
 //
-// 本仓尚未实现（见 README 的状态一节）。放这个文件只是为了：
-//  1. 让 `go build ./...` 从一开始就是绿的（空 module 会报 no Go files）；
-//  2. 让本仓可被 `go list ./...` 识别，从而能接入 R1/R2 自检。
+// 实现按能力拆在子包里，不堆在根包：
 //
-// 实现落地时按能力拆子包，不要把所有代码堆在根包。
+//   - internal/analysis：纯函数计算（metrics / benchmark / attribution /
+//     montecarlo / correlation / export）、消费端端口、Memory Store、DDL；
+//   - internal/httpapi：8 个 HTTP 端点（docs/api-schema.md）；
+//   - cmd/analyticsservice：进程入口。
+//
+// 根包保留空的包声明是为了让 `go build ./...` / `go list ./...` 从一开始
+// 就能识别本 module。现状与未落项见 docs/ARCHITECTURE.md §9.8 与
+// docs/TASKS.md 的 QT-43 施工记录。
 package analytics

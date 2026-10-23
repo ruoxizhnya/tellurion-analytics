@@ -1,20 +1,20 @@
 ---
 status: active
-last-verified: 2026-10-22
-verified-by: M8 接口对表（QT-43 前置 ②）
+last-verified: 2026-10-23
+verified-by: QT-43 施工 ①（X4a~X4d 代码落盘，`internal/analysis` + `internal/httpapi`）
 ---
 
 # API Schema — tellurion-analytics
 
-> **实现状态（2026-10-20）**：本仓目前**只有占位 `doc.go`，没有任何 handler**——下列端点**全部未实现**。
-> 本文件是**目标契约**，不是现状说明书；开工顺序见 `docs/TASKS.md` 的「施工序」。
+> **实现状态（2026-10-23）**：8 个端点全部在 `internal/httpapi` 落盘，计算面在 `internal/analysis`（纯函数）；**但上游端口尚未接线**——`ResultReader` / `BenchmarkReader` / holdings / 因子暴露 / QT-44 队列在 `cmd/analyticsservice` 里都是 nil。
+> 未接线的端口一律 fail-closed 成 `503 dependency_unavailable`，**不伪造结果、不返回空报告**。因此本文件仍是**契约真相源**：端点形状按此冻结，可用性取决于接线进度（`docs/TASKS.md` QT-43 施工记录「未落项」）。
 
 > **契约地位**：HTTP，**全部只读语义**（POST 表示"提交计算"，不改上游）。重计算走异步 job。
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
 > 跨仓消费方（core / agent / ui / 其他服务）按本文件编码，**不读本仓实现**。
 > **请求 / 响应形状**：本文只冻结**路径、错误码、幂等与兼容**；逐端点的目标签名、DTO 字段与版本策略见 `ARCHITECTURE.md` §9（M8 接口对表），两处必须同步改，不复制形状。
-> **鉴权**：按 core `QT-50 ④` 统一（JWT + RBAC），默认 fail-closed；本仓不另定鉴权契约。
-> **⛔ 前置**：`POST /api/analysis/sensitivity` 依赖 X5 的 job 队列（QT-44），`POST /api/analysis/attribution` 的 Brinson 依赖 holdings artifact——两者在 `ARCHITECTURE.md` §9.7 R2/R3 落地前**不实现**（形状不冻结）。
+> **鉴权**：按 core `QT-50 ④` 统一（JWT + RBAC），默认 fail-closed；本仓不另定鉴权契约。**当前未接线鉴权**（`ARCHITECTURE.md` §9.7 R6），进程只监听回环地址。
+> **前置现状**：sensitivity 依赖 X5 的 job 队列（QT-44，R3）、Brinson 依赖 holdings artifact（R2）、基准序列依赖 X1b 或 interim adapter（R4）——三处**代码已就位、依赖未落地**，缺依赖即 503，不降级出假报告。
 
 ## 1. 接口面
 
@@ -28,6 +28,13 @@ verified-by: M8 接口对表（QT-43 前置 ②）
 | POST | `/api/analysis/correlation` | `{run_ids[]}` → 相关性矩阵 |
 | GET | `/api/analysis/reports/{id}` | 报告（JSON / HTML） |
 | GET | `/api/analysis/reports/{id}/export?format=html\|csv` | 导出（**pdf 未定**，见 `ARCHITECTURE.md` §9.7 R5） |
+
+**响应公共前缀**：所有**同步计算端点**（metrics / benchmark / attribution / correlation）与 `GET /reports/{id}` 的 2xx 报告体，都以 `{report_id, run_id, analysis_type, status}` 开头，随后才是各类型载荷。异步提交端点（sensitivity / montecarlo）只返回 `{report_id, status:"pending"}`，完整信封由 `GET /reports/{id}` 给出。
+
+**两处实现口径（契约已同步）**：
+
+- `metrics` 的 `computed` 只有 `volatility / var_95 / cvar_95`；**`beta` 不在 metrics 报告里**——它需要基准序列，归 `benchmark` 报告（`ARCHITECTURE.md` §9.4）。`sources` 标注 `from_result` 与 `computed` 各自的来源。
+- `correlation` 的报告 `run_id` 是**去重保序后的逗号拼接**（如 `"r1,r2,r3"`）；矩阵行序即 `strategies` 顺序。
 
 ## 2. 错误码与 fail-closed 语义
 
@@ -48,8 +55,9 @@ verified-by: M8 接口对表（QT-43 前置 ②）
 | 上游结果不完整（缺曲线 / holdings / 因子暴露） | 409 `run_result_incomplete` | 拒算，不猜；明细点名缺哪个输入 |
 | 基准已登记但取不到序列 | 409 `benchmark_data_unavailable` | 不回落别的基准 / 不拿价格指数冒充全收益 |
 | 报告未完成（导出 / 读取报告体） | 409 `report_not_ready` | 轮询 `GET /reports/{id}` |
+| 依赖端口未接线（上游读取面 / QT-44 队列 / 基准读取面） | 503 `dependency_unavailable` | **不降级**：不伪造结果、不返回空报告、不回落别的数据源；接线后重试 |
 
-**原则**：宁可报错，也不产出一份"看起来正常"的错误报告。`invalid` / `failed` / `incomplete` 三者**分开报**——它们对调用方的处置完全不同（换 run / 修上游 / 等数据）。
+**原则**：宁可报错，也不产出一份"看起来正常"的错误报告。`invalid` / `failed` / `incomplete` 三者**分开报**——它们对调用方的处置完全不同（换 run / 修上游 / 等数据）。`503` 是**部署态**问题（代码在、依赖没接），与业务错误分开，调用方应重试或联系运维，**不应**把它当"该 run 没数据"。
 
 ## 3. 幂等性与重试
 
@@ -57,7 +65,9 @@ verified-by: M8 接口对表（QT-43 前置 ②）
 - `input_hash` 覆盖所有读取输入（结果体 / 基准 `dataset_hash` / holdings artifact / 因子数据集）：**输入换版 ⇒ 新报告**，不复用旧结论。
 - `params_hash` 是请求参数（基准代码 / 归因方法 / 网格 / n 等）的 canonical hash；不同参数 ⇒ 不同 `report_id`。
 - 异步 job 的提交返回 `{report_id, status:"pending"}`，轮询用 `GET /reports/{id}`；**作业态（pending/running/completed/failed）不是 K9 三值**，报告只在 completed 时存在。
+- `seed` 是 `*int64`：缺省 / `null` ⇒ `400 seed_required`；**`0` 是合法的显式种子**（可复现），不套用引擎「0 = time-based」语义（`ARCHITECTURE.md` §9.1 F6）。
 - `POST /correlation` **不返回部分矩阵**：任一 run 不可用（缺 / invalid / failed / 点数不足）即整体拒绝。
+- 归因报告里的 `residual` 是**独立字段**，不得摊进 `contributions`；它同时落 `analysis.attribution`（`db-schema.md` §1）。
 - 只读 GET 与导出可任意重试；导出未完成报告 → 409。
 
 ## 4. 版本与兼容

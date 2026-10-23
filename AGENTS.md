@@ -6,9 +6,9 @@
 
 分析服务：基准 / 归因 / 敏感性 / 蒙特卡洛。**纯函数、只读上游**——不持有跨请求状态、不写任何上游表；但**拥有自己的结果表** `analysis.*`（reports / benchmarks / sensitivity_runs / mc_runs / attribution，见 `docs/db-schema.md`）。
 
-**状态**：预留（S0 占位，触发式启动）——尚未启动，无实现
+**状态**：已启动（2026-10-23，QT-43 施工 ①）——X4a~X4d 的代码与测试已落盘，`go build/vet/test` 全绿；**上游端口与 PG 尚未接线**，进程用 Memory Store，未接线端口 fail-closed 成 `503 dependency_unavailable`。现状详见 `docs/ARCHITECTURE.md` §9.8，未落项见 `docs/TASKS.md` QT-43 施工记录。
 
-**今天的实现**：`core:pkg/backtest/metrics`（绩效指标）+ `core:pkg/data/factor_attribution.go`（因子归因 —— ⚠️ 算法住在数据包里，属历史遗留）+ `core:pkg/indicator`。
+**今天的实现**：本仓自有 `internal/analysis`（纯函数 + 端口 + Memory Store + DDL）、`internal/httpapi`（8 端点）、`cmd/analyticsservice`。上游计算口径的参考实现仍在 core（`core:pkg/backtest/metrics`、`core:pkg/backtest/reporting`），本仓**只对照公式、不 import**。
 
 ## 2. 构建 / 测试（必须单仓可跑）
 
@@ -47,8 +47,10 @@ go test ./...
 
 | 依赖 | 版本 | 说明 |
 |---|---|---|
-| `github.com/ruoxizhnya/tellurion-contracts` | 待定（S2 后 `v0.1.0`） | `BacktestResult` 等 DTO 只认契约 |
-| `github.com/ruoxizhnya/tellurion-kit` | 待定（S2 后 `v0.1.0`） | 日志 / 统计 / HTTP |
+| `github.com/ruoxizhnya/tellurion-contracts` | 未引入（待 S2 后 `v0.1.0`） | 契约仓的 `analysis` 包未发布；本仓暂以 `internal/analysis/model.go` 的本地 DTO 镜像冻结形状（只消费、不输出） |
+| `github.com/ruoxizhnya/tellurion-kit` | 未引入（待 S2 后 `v0.1.0`） | 日志 / 统计 / HTTP；当前只用标准库 |
+
+> **今日 `go.mod` 零 `require`**（2026-10-23）。这是临时状态，不是"以后也不依赖"：契约发布后按 `docs/ARCHITECTURE.md` §9.8 迁走本地镜像。
 
 > 跨仓依赖**只认版本号**（伪版本或 tag），不认源码路径。契约变更走 `tellurion-contracts` 的发布，不走"顺手改一下"。
 

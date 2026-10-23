@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-22
-verified-by: M8 接口对表（QT-43 前置 ②）
+last-verified: 2026-10-23
+verified-by: QT-43 施工 ①（导航补 §9.8 实现现状）
 ---
 
 # 文档导航 — tellurion-analytics
@@ -19,6 +19,7 @@ verified-by: M8 接口对表（QT-43 前置 ②）
 | 改表 / 加列 | [`db-schema.md`](db-schema.md) |
 | 加 / 改接口 | [`api-schema.md`](api-schema.md) |
 | 查某个 port / DTO / 端点的签名、错误语义、版本策略 | [`ARCHITECTURE.md`](ARCHITECTURE.md) §9「接口对表」 |
+| 想知道"现在哪些能跑、哪些只是接口就位" | [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.8「实现现状」 |
 | 改数据流向或顺序 | [`dataflow.md`](dataflow.md) |
 | 想知道"为什么这样设计" | [`adr/`](adr/README.md) |
 | 要做删档 / 迁移 / 流程变更 | [`odr/`](odr/README.md) |

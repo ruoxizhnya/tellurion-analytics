@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-22
-verified-by: M8 接口对表（QT-43 前置 ②）
+last-verified: 2026-10-23
+verified-by: QT-43 施工 ①（DDL 落盘 `internal/analysis/ddl.go`，执行入口未接线）
 ---
 
 # DB Schema — tellurion-analytics
@@ -9,20 +9,25 @@ verified-by: M8 接口对表（QT-43 前置 ②）
 > **所有权声明**：本仓**拥有 `analysis` schema 的 DDL**：报表、基准登记、敏感性、蒙特卡洛批次、归因结果。是这组表的唯一写者。
 > 上级依据：`tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §1 —— **DDL 只有一个 owner**，同一个 PG 实例、每服务一个 schema，将来拆库是"按 schema 搬走"而不是重写。
 > 本文件是本仓表结构的**唯一真相源**：代码里的建表语句与它不一致时，**改代码**；要改表结构，先改本文件（结构级变更还要立 ADR）。
+> **现状（2026-10-23）**：5 张表的 DDL 已落 `internal/analysis/ddl.go`（`migrationStatements` + `Migrations()` 副本），**但 PG 连接与启动执行尚未接线**——进程当前只用 `Memory` Store。下表是 DDL 的逐字对表，不是"计划"。
 
 ## 1. 归属表
 
-| 表 | 内容 | 现状 |
-|---|---|---|
-| `analysis.reports` | 分析任务结果（`run_id` → 报告 JSON/HTML） | 待建 |
-| `analysis.benchmarks` | 基准序列**登记**（代码、来源、hash） | 待建（基准行情本体归数据服务，此处只存引用） |
-| `analysis.sensitivity_runs` | 参数敏感性网格结果 | 待建 |
-| `analysis.mc_runs` | 蒙特卡洛 / bootstrap 批次（**`seed` 必填**） | 待建 |
-| `analysis.attribution` | 归因结果（Brinson / 因子） | 待建，与 `ic_analysis` / `factor_returns` 区分：那是因子研究，这是**回测结果归因** |
+> DDL 唯一来源：`internal/analysis/ddl.go`。`analysis.reports` 的 `UNIQUE NULLS NOT DISTINCT` 需要 **PG15+**：默认唯一约束不拦 NULL 重复，非 MC 报告的 `seed` 为 NULL 时会重复落行。
+
+| 表 | 主键 | 关键列与约束 | 现状 |
+|---|---|---|---|
+| `analysis.reports` | `report_id` | `run_id`、`analysis_type`（CHECK 六值）、`status`（CHECK pending/running/completed/failed）、`metrics_version`、`params_hash CHAR(64)`、`input_hash CHAR(64)`、`seed BIGINT`（可空）、`body JSONB`、`error TEXT DEFAULT ''`、`created_at` / `updated_at`；UNIQUE `NULLS NOT DISTINCT (run_id, analysis_type, params_hash, input_hash, seed, metrics_version)`；**CHECK `(status='completed') = (body IS NOT NULL)`**、**CHECK `status<>'failed' OR error<>''`** | DDL 已落，执行未接线 |
+| `analysis.benchmarks` | `(code, adjustment_basis, dataset_hash)` | `source TEXT DEFAULT ''`、`registered_at`；**只存引用，不存行情本体**（行情归 data）；新 `dataset_hash` = 新一行，不覆盖 | DDL 已落，执行未接线 |
+| `analysis.sensitivity_runs` | `report_id` → `analysis.reports` | `run_id`、`grid JSONB NOT NULL`、`points JSONB`（逐点结果，可空直到有结果） | DDL 已落；**写入方依赖 QT-44（R3）** |
+| `analysis.mc_runs` | `report_id` → `analysis.reports` | **`seed BIGINT NOT NULL`**、`n INTEGER CHECK (n>0)`、`method`（CHECK bootstrap/shuffle）、`input_hash CHAR(64)`、`summary JSONB NOT NULL` | DDL 已落，写入已实现（Memory）；PG 未接线 |
+| `analysis.attribution` | `report_id` → `analysis.reports` | `method`（CHECK brinson/factor）、`contributions JSONB NOT NULL`、**`residual DOUBLE PRECISION NOT NULL`**、`input_hash CHAR(64)` | DDL 已落，写入已实现（Memory）；PG 未接线 |
+
+另有 `reports_run_type_idx`（`run_id, analysis_type`）便于按 run 反查报告。
 
 **只读输入**：回测结果（`run` / 内核输出）、基准行情（数据服务）、因子值（数据服务）。**本仓不写它们的表。**
 
-> **目标键与写入语义见** `ARCHITECTURE.md` §9.5（M8 对表）：`analysis.reports` 以 `report_id` 为 PK、`(run_id, analysis_type, params_hash, input_hash, seed, metrics_version)` 唯一；`analysis.mc_runs.seed` NOT NULL；`analysis.benchmarks` 的 `adjustment_basis` 与 `dataset_hash` 进登记身份。本文件仍是 **DDL 唯一真相源**，X4a 落地时按 §9.5 补列。
+> **目标键与写入语义见** `ARCHITECTURE.md` §9.5（M8 对表）。`analysis.reports` 以 `report_id` 为 PK、六元组唯一；`analysis.mc_runs.seed` NOT NULL；`analysis.benchmarks` 的 `adjustment_basis` 与 `dataset_hash` 进登记身份。本文件仍是 **DDL 唯一真相源**。
 
 ## 2. 只读输入（不属于本仓，禁止写入）
 
@@ -47,16 +52,13 @@ verified-by: M8 接口对表（QT-43 前置 ②）
 
 **本仓约定**（从建仓第一天执行）：
 
-- 迁移文件只放 `migrations/`，命名 `<序号>_<动作>.sql`，**本仓内**递增（不与别的仓共享序列，也不复用号）。
-- **执行机制随第一个建表单定，二选一（不能"都不选"）**：
-  1. **core 式**：Go 里的 `migrationStatements()` 数组 + 启动执行，幂等、无版本表——与 core 一致、运维零新增；
-  2. **版本化**：引入迁移库 + `schema_migrations` 表（可 down、有执行记录）——服务变多后更稳，但要一次性 baseline。
-  **取向**：X1~X3 期间优先 ①（少一层依赖），服务数 ≥3 或出现"必须先降级"的需求时重估 ②。
-- **只前滚**：已合并的迁移不改；修错靠新增一条。
+- **执行机制已定：取向 ①（core 式）**——DDL 是 Go 数组 `internal/analysis/ddl.go: migrationStatements`，启动时按序执行，幂等、无版本表、无 down。**不建 `migrations/*.sql`**（本仓没有历史镜像要维护）。
+- **只前滚**：已合并的语句不改；修错靠新增一条。
 - 每条必须可重入（`IF NOT EXISTS` / `IF EXISTS`），且能在空库上一次跑完。
 - 跨 schema 取数只走**只读视图或 API**；出现 `join` 别人的表就是边界腐化的第一信号。
 - 结构变更的同步义务：本文件 + `docs/ARCHITECTURE.md` 的「数据归属」节必须同一次提交里更新。
 
 ## 5. 待定
 
-- 报告体存 JSONB 还是对象存储：本地栈先 JSONB + 体积上限。
+- 报告体体积上限（`body JSONB`）：`api-schema.md` 只限请求体 1 MiB；报告体上限与超限处置（拒绝 vs 外部对象存储）尚未裁决。
+- PG Store 与启动执行入口尚未接线（`docs/TASKS.md` QT-43 施工记录「未落项」）；接线时须保留 `Migrations()` 副本语义，防止调用方改到内部数组。
