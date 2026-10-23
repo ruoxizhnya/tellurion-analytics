@@ -51,8 +51,8 @@ go test ./...
 
 | 依赖 | 版本 | 说明 |
 |---|---|---|
-| `github.com/ruoxizhnya/tellurion-contracts` | 未引入（待 S2 后 `v0.1.0`） | 契约仓的 `analysis` 包未发布；本仓暂以 `internal/analysis/model.go` 的本地 DTO 镜像冻结形状（只消费、不输出） |
-| `github.com/ruoxizhnya/tellurion-kit` | 未引入（待 S2 后 `v0.1.0`） | 日志 / 统计 / HTTP；当前只用标准库 |
+| `github.com/ruoxizhnya/tellurion-contracts` | 未引入（最新 `v0.3.0`，2026-10-23 发版；仍无 `analysis` 包） | 契约仓的 `analysis` 包未发布；本仓暂以 `internal/analysis/model.go` 的本地 DTO 镜像冻结形状（只消费、不输出） |
+| `github.com/ruoxizhnya/tellurion-kit` | 未引入（`v0.1.0` 已发版） | 日志 / 统计 / HTTP；当前只用标准库 |
 | `github.com/jackc/pgx/v5` | `v5.11.0` | `analysis.*` 的 PG 连接池与迁移执行（`internal/analysis/pgstore.go`）；选 pgx 而非 `database/sql` 驱动是为了直接拿 `pgxpool` 与 `pgtype` 的 NULL 语义 |
 
 > `go.mod` 现在只有上面这一条直接依赖（2026-10-24，施工 ②）。契约发布后按 `docs/ARCHITECTURE.md` §9.8 迁走本地镜像。
