@@ -78,7 +78,7 @@ verified-by: QT-43 施工 ②（PG Store / 启动迁移 / 上游读取端口接�
 2. **R1 的 K9-correct 持久读面**：core 侧尚未落地；当前适配器对同步结果可用、对无 `status` 的异步结果 fail-closed。R1 落地后只换 URL/路径，端口与 DTO 不变。
 3. **R2 artifact 形状与 owner**：wire 形状仍是本地临时镜像，未迁 contracts。
 4. **PDF 导出**：**R5 已裁（2026-10-24）= 非目标**，只承诺 html / csv。
-5. **鉴权**：QT-50 ④ 未落；进程仍只监听回环。
+5. **鉴权（裁-15，2026-10-25 已定，可开工）**：QT-50 ④ 的服务侧腿。口径：kit `v0.1.1` 的 net/http 适配（非 gin 中间件）；policy 表：6 个 `POST /api/analysis/*`（计算并落报告）= trader，`GET /api/analysis/reports/{id}` 与 `/export` = viewer；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。接线时把 `AuthStatus = "unwired"` 与 `TestAuthNotWiredCurrentState` 一并翻转成 401/403 断言，并加 route table ≡ policy table 守卫。
 6. **契约迁移**：`tellurion-contracts` 的 `analysis` 包未发布，本地 DTO 镜像未迁走。
 
 **验收现状**：⑤ 三条判据已在**真库 E2E** 层成立（不再是仅单测）；本单保持 🔶 —— sensitivity 逐点回填、R1/R2 契约化、鉴权仍未落（PDF 已裁为非目标），不写成已完成。
