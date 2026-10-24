@@ -40,8 +40,11 @@ func New(svc *analysis.Service) *Server {
 func (s *Server) Handler() http.Handler { return s.mux }
 
 type errorBody struct {
-	Error          string   `json:"error"`
-	Code           string   `json:"code"`
+	Error string `json:"error"`
+	Code  string `json:"code"`
+	// Missing 是 run_result_incomplete 的机器可读明细（缺哪个输入）；
+	// 词表见 docs/api-schema.md §6。其他错误码不带本字段。
+	Missing        string   `json:"missing,omitempty"`
 	InvalidReasons []string `json:"invalid_reasons,omitempty"`
 }
 
@@ -293,7 +296,12 @@ func writeError(w http.ResponseWriter, err error) {
 		log.Printf("httpapi: internal error: %v", err)
 		msg = "internal error"
 	}
-	writeJSON(w, status, errorBody{Error: msg, Code: code, InvalidReasons: reasons})
+	var incomplete *analysis.IncompleteError
+	missing := ""
+	if errors.As(err, &incomplete) {
+		missing = incomplete.Missing
+	}
+	writeJSON(w, status, errorBody{Error: msg, Code: code, Missing: missing, InvalidReasons: reasons})
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

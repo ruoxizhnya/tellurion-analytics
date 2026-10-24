@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-24
-verified-by: QT-43 施工 ②（PG Store + 上游读取适配器接线 + 真库 E2E）
+last-verified: 2026-10-25
+verified-by: QT-43 施工 ③（R1/R2 契约化 + 鉴权现状登记）
 ---
 
 # API Schema — tellurion-analytics
@@ -13,7 +13,7 @@ verified-by: QT-43 施工 ②（PG Store + 上游读取适配器接线 + 真库 
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
 > 跨仓消费方（core / agent / ui / 其他服务）按本文件编码，**不读本仓实现**。
 > **请求 / 响应形状**：本文只冻结**路径、错误码、幂等与兼容**；逐端点的目标签名、DTO 字段与版本策略见 `ARCHITECTURE.md` §9（M8 接口对表），两处必须同步改，不复制形状。
-> **鉴权**：按 core `QT-50 ④` 统一（JWT + RBAC），默认 fail-closed；本仓不另定鉴权契约。**当前未接线鉴权**（`ARCHITECTURE.md` §9.7 R6），进程只监听回环地址。
+> **鉴权**：按 core `QT-50 ④` 统一（JWT + RBAC），默认 fail-closed；本仓不另定鉴权契约。**当前未接线鉴权**（`ARCHITECTURE.md` §9.7 R6），进程只监听回环地址——现状登记见 §7。
 > **前置现状**：sensitivity 的 job 队列依赖 G7/X5b（`tellurion-orchestration` QT-44，**未落**，该端点 503）；结果读取走 R1 落地前的 interim 适配器（无 `status` 的异步结果 fail-closed）；基准走 X1b（已落）；holdings / 因子暴露走 interim artifact 面（R2 形状未冻结）。缺依赖即报错，不降级出假报告。
 
 ## 1. 接口面
@@ -27,7 +27,7 @@ verified-by: QT-43 施工 ②（PG Store + 上游读取适配器接线 + 真库 
 | POST | `/api/analysis/montecarlo` | `{run_id, n, seed}` → 分布 / 置信区间（**异步 job**） |
 | POST | `/api/analysis/correlation` | `{run_ids[]}` → 相关性矩阵 |
 | GET | `/api/analysis/reports/{id}` | 报告（JSON / HTML） |
-| GET | `/api/analysis/reports/{id}/export?format=html\|csv` | 导出（**pdf 未定**，见 `ARCHITECTURE.md` §9.7 R5） |
+| GET | `/api/analysis/reports/{id}/export?format=html\|csv` | 导出（**pdf 已裁为非目标**，见 `ARCHITECTURE.md` §9.7 R5） |
 
 **响应公共前缀**：所有**同步计算端点**（metrics / benchmark / attribution / correlation）与 `GET /reports/{id}` 的 2xx 报告体，都以 `{report_id, run_id, analysis_type, status}` 开头，随后才是各类型载荷。异步提交端点（sensitivity / montecarlo）只返回 `{report_id, status:"pending"}`，完整信封由 `GET /reports/{id}` 给出。
 
@@ -36,14 +36,16 @@ verified-by: QT-43 施工 ②（PG Store + 上游读取适配器接线 + 真库 
 - `metrics` 的 `computed` 只有 `volatility / var_95 / cvar_95`；**`beta` 不在 metrics 报告里**——它需要基准序列，归 `benchmark` 报告（`ARCHITECTURE.md` §9.4）。`sources` 标注 `from_result` 与 `computed` 各自的来源。
 - `correlation` 的报告 `run_id` 是**去重保序后的逗号拼接**（如 `"r1,r2,r3"`）；矩阵行序即 `strategies` 顺序。
 
+**错误体（本轮契约化）**：`run_result_incomplete` 的响应带机器可读 `missing`（缺哪个输入），取值词表见 §6；其他错误码不带该字段。调用方**不应**解析 `error` 文本。
+
 ## 2. 错误码与 fail-closed 语义
 
 > 错误码与 `ARCHITECTURE.md` §9.4 **双向一一对应**；本节是 code 的**唯一词表**，新增 code 必须先改这里。
 
 | 情况 | 返回 | 说明 |
 |---|---|---|
-| 无凭证 / token 过期 | 401 `unauthenticated`（body 随 QT-50 ④ 统一面） | 不重试，补齐凭证 |
-| 角色不足 | 403 `forbidden` | 不重试 |
+| 无凭证 / token 过期 | 401 `unauthenticated`（body 随 QT-50 ④ 统一面） | 不重试，补齐凭证。**目标态，当前未实现**（§7） |
+| 角色不足 | 403 `forbidden` | 不重试。**目标态，当前未实现**（§7） |
 | 请求体 / 参数非法（含 `n<=0`、空网格、ID 数越界） | 400 `invalid_params` | 修正后重试 |
 | 归因方法不支持 | 400 `method_not_supported` | 只接受 `brinson` / `factor` |
 | 缺 `seed`（蒙特卡洛） | 400 `seed_required` | **fail-closed**：没有种子就不算（`seed=0` 是合法显式种子） |
@@ -52,7 +54,7 @@ verified-by: QT-43 施工 ②（PG Store + 上游读取适配器接线 + 真库 
 | 报告不存在 | 404 `report_not_found` | 不重试 |
 | 回测结果 **invalid** | 409 `run_result_invalid` + `invalid_reasons` | **拒算**；不得当 completed（K9 三值原样透传） |
 | 回测结果 **failed** | 409 `run_result_failed` + `error` | 拒算；不当"可重试成功" |
-| 上游结果不完整（缺曲线 / holdings / 因子暴露） | 409 `run_result_incomplete` | 拒算，不猜；明细点名缺哪个输入 |
+| 上游结果不完整（缺曲线 / holdings / 因子暴露 / artifact 口径） | 409 `run_result_incomplete` + `missing` | 拒算，不猜；`missing` 点名缺哪个输入（词表见 §6） |
 | 基准已登记但取不到序列 | 409 `benchmark_data_unavailable` | 不回落别的基准 / 不拿价格指数冒充全收益 |
 | 报告未完成（导出 / 读取报告体） | 409 `report_not_ready` | 轮询 `GET /reports/{id}` |
 | 依赖端口未配置 / 未接线（QT-44 队列；或部署未给上游 URL） | 503 `dependency_unavailable` | **不降级**：不伪造结果、不返回空报告、不回落别的数据源；补齐配置或接线后重试 |
@@ -76,7 +78,7 @@ verified-by: QT-43 施工 ②（PG Store + 上游读取适配器接线 + 真库 
 
 - 报告**格式**演进要保留旧版本读取（历史报告不能失效）。
 - 指标定义变更算 breaking：老报告不重算，新报告注明口径版本（`metrics_version`）。
-- 端点只增不删。导出格式：html / csv 稳定；**pdf 未定**（无渲染器，见 `ARCHITECTURE.md` §9.7 R5），冻结前不承诺。
+- 端点只增不删。导出格式：html / csv 稳定；**pdf 已裁为非目标**（R5，2026-10-24），不再列入承诺面。
 
 ## 5. 不提供什么（边界）
 
@@ -85,3 +87,80 @@ verified-by: QT-43 施工 ②（PG Store + 上游读取适配器接线 + 真库 
 - 不做因子研究（`ic_analysis` / `factor_returns` 那套留在 core；两表实为 **public 无前缀**，不写 `quant.`）
 - 不做实时分析（全部按 run 的离线计算）
 - **不解析 job 错误串还原三值**：结果读取必须走 K9-correct 的读取面（`ARCHITECTURE.md` §9.1 F1 / R1），本仓不靠 `"backtest produced an invalid run: ..."` 这种字符串猜状态。
+
+## 6. 上游读取契约（R1 结果面 / R2 artifact 面）v1
+
+> 这不是对外 API，但它是**本仓读上游**的冻结形状——`409 / 404 / 503` 的归因全靠它，所以同样按契约管理。
+> 契约版本：`analysis.UpstreamContractVersion = "v1"`（`internal/analysis/upstream_contract.go`）；形状镜像在 `internal/analysis/model.go`。
+> **仍未迁 `tellurion-contracts`**（该仓 `analysis` 包未发布）。迁移时端口方法集与校验语义不变，只换 DTO 的 owner。
+> **版本策略**：加字段 = MINOR（`omitempty`，消费端忽略未知字段）；**改名 / 删字段 / 改语义 = breaking**，先改本节再改代码。
+> **钉死方式**：`TestUpstreamContractWireShape` 用 golden JSON 往返比对（字段名被改 / 被删即红）；`TestUpstreamContractArtifactFailClosed` 钉必填项。
+
+### 6.1 R1 结果面 — `BacktestResponse`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `id` | string | 否 | run id（幂等键来自请求，不依赖它） |
+| `status` | `completed \| invalid \| failed` | **是** | K9 三值，**原样透传**；缺失 / 未知 ⇒ `409 run_result_incomplete`（`missing=status`），**不解析错误串** |
+| `error` | string | failed 时 | 上游原文透传（`run_result_failed`） |
+| `invalid_reasons` | string[] | invalid 时 | 原样透传（`run_result_invalid`） |
+| `start_date` / `end_date` | string | 否 | 期间 |
+| `total_return` / `annual_return` / `sharpe_ratio` / `sortino_ratio` / `max_drawdown` / `win_rate` / `avg_holding_days` / `calmar_ratio` | number | 否 | 上游指标，本仓只读 |
+| `max_drawdown_date` | string | 否 | 同上 |
+| `total_trades` / `win_trades` / `lose_trades` | int | 否 | 同上 |
+| `portfolio_values` | `{date, total_value}[]` | completed 时 | 净值曲线；空 ⇒ `409 run_result_incomplete`（`missing=portfolio_values`） |
+
+**fail-closed 规则**：`status` 不在三值内 ⇒ 拒算（含 core 异步结果的「无 status」编码，`ARCHITECTURE.md` §9.1 F1）。**禁止**从 `"backtest produced an invalid run: ..."` 之类字符串反推状态。
+
+### 6.2 R2 artifact 面 — `PortfolioSnapshot` / `FactorExposures`
+
+`PortfolioSnapshot`（Brinson 输入）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `holdings` | `{symbol, sector, weight, period_return}[]` | **是** | 期末持仓；为空 ⇒ `missing=holdings` |
+| `benchmark_sector_weights` | `{sector: number}` | **是** | 基准分行业权重；缺失 ⇒ `missing=benchmark_sector_weights` |
+| `benchmark_sector_returns` | `{sector: number}` | **是** | 基准分行业收益；缺失 ⇒ `missing=benchmark_sector_returns` |
+| `benchmark_return` | number | 否 | 基准期收益（Brinson 算术用） |
+| `dataset_hash` | string | **是** | artifact 版本身份，**进 `input_hash`**；缺失 ⇒ `missing=holdings.dataset_hash` |
+
+`FactorExposures`（因子归因输入）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `factors` | `{name, exposure, factor_return}[]` | **是** | 为空 ⇒ `missing=factor_exposures` |
+| `dataset_hash` | string | **是** | 同上，进 `input_hash`；缺失 ⇒ `missing=factor_exposures.dataset_hash` |
+
+**为什么 `dataset_hash` 必填**：它参与派生 `report_id` 的 `input_hash`（§3）。缺了就无法区分 artifact 换版，同键会**复用旧结论**。校验点必须在算 `input_hash` **之前**（`Service.Attribution`），不能只在计算函数里。
+**为什么行业权重 / 收益必填**：缺失会被静默按 `0` 算出一份「看起来正常」的归因——必须拒算，不用成交明细倒推持仓（`ARCHITECTURE.md` §9.1 F2）。
+
+### 6.3 `missing` 词表（闭集）
+
+`run_result_incomplete` 的 `missing` 只能取下列标识；`IncompleteError.Detail` 的人读定位**不进 wire**。
+
+| `missing` | 缺什么 |
+|---|---|
+| `run result` | 上游根本没返回结果体 |
+| `status` | 结果缺 K9 `status`，或取值不在三值内 |
+| `portfolio_values` | 净值曲线为空 |
+| `portfolio_returns` | 收益序列不足（指标 / 蒙特卡洛） |
+| `equity_curve` | 相关性输入的点数不足（`Detail` 带 run id 与下限） |
+| `benchmark_series` | 已登记基准取不到序列 |
+| `holdings` | Brinson 的持仓 artifact 为空 |
+| `holdings.dataset_hash` | 持仓 artifact 缺版本身份 |
+| `benchmark_sector_weights` | 基准分行业权重缺失 |
+| `benchmark_sector_returns` | 基准分行业收益缺失 |
+| `factor_exposures` | 因子暴露为空 |
+| `factor_exposures.dataset_hash` | 因子数据集缺版本身份 |
+
+新增标识必须先改本节（`writeError` 原样透出 `IncompleteError.Missing`，无兜底映射）。
+
+## 7. 鉴权现状登记（2026-10-25）
+
+> 本节记录**今天的事实**，不是目标态。目标态见 §2 的 401 / 403 两行与 `ARCHITECTURE.md` §9.7 R6；两者不得混读。
+
+- **代码登记**：`httpapi.AuthStatus = "unwired"`（`internal/httpapi/auth_status.go`）。改鉴权必须同时改这个常量，否则 `TestAuthNotWiredCurrentState` 直接红。
+- **事实**：`Server` **不装鉴权中间件**、**不读** `Authorization`、**不产出** 401 / 403；任何调用方（含伪造 `Bearer`）只要路径与参数合法即得 2xx。§2 的 401 `unauthenticated` / 403 `forbidden` **尚未实现**。
+- **可执行锚点**：`TestAuthNotWiredCurrentState` —— 无凭证、伪造 `Bearer not-a-real-token` 均断言 `200`。接线鉴权时该用例应转红，届时**改写**为 401 断言，而非删除。
+- **当前安全边界**：仅靠部署侧监听回环（`cmd/analyticsservice` 默认 `127.0.0.1:8087`）。**不要把本服务暴露到非回环地址**——这等于公开无鉴权端点。
+- **接线清单（QT-50 ④ 落地时一并改）**：① `AuthStatus` 常量与 `TestAuthNotWiredCurrentState`；② 本节与 §2 两行去掉「未实现」；③ `ARCHITECTURE.md` §9.7 R6；④ `docs/TASKS.md` QT-43 的「鉴权」条目。

@@ -46,12 +46,19 @@ func (e *FailedError) Error() string {
 func (e *FailedError) Unwrap() error { return ErrRunFailed }
 
 // IncompleteError 点名缺哪个输入（不做猜测、不产半份报告）。
+//
+// Missing 是稳定标识（词表 = docs/api-schema.md §6.3），会原样进 wire 的
+// `missing`；Detail 只做人读定位，不进 wire。
 type IncompleteError struct {
 	Missing string
+	Detail  string
 }
 
 func (e *IncompleteError) Error() string {
-	return fmt.Sprintf("%s: missing %s", ErrRunIncomplete, e.Missing)
+	if e.Detail == "" {
+		return fmt.Sprintf("%s: missing %s", ErrRunIncomplete, e.Missing)
+	}
+	return fmt.Sprintf("%s: missing %s (%s)", ErrRunIncomplete, e.Missing, e.Detail)
 }
 
 func (e *IncompleteError) Unwrap() error { return ErrRunIncomplete }

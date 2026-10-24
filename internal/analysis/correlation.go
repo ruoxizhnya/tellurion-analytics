@@ -54,7 +54,10 @@ func buildCorrelationPayload(ids []string, results map[string]*BacktestResponse)
 			values = append(values, pv.TotalValue)
 		}
 		if len(values) < MinEquityPoints {
-			return CorrelationPayload{}, &IncompleteError{Missing: fmt.Sprintf("equity_curve of %s (need >= %d points)", id, MinEquityPoints)}
+			return CorrelationPayload{}, &IncompleteError{
+				Missing: "equity_curve",
+				Detail:  fmt.Sprintf("run %s (need >= %d points)", id, MinEquityPoints),
+			}
 		}
 		rets := equityToReturns(values)
 		returnsByStrategy[id] = rets
@@ -103,6 +106,9 @@ func equityToReturns(equity []float64) []float64 {
 
 // requireResult 把上游三值映射成领域哨兵（原样透传，不重判）。
 func requireResult(resp *BacktestResponse) error {
+	if err := validateResultContract(resp); err != nil {
+		return err
+	}
 	switch resp.Status {
 	case ResultCompleted:
 		if len(resp.PortfolioValues) == 0 {
@@ -111,9 +117,7 @@ func requireResult(resp *BacktestResponse) error {
 		return nil
 	case ResultInvalid:
 		return &InvalidReasonsError{Reasons: append([]string(nil), resp.InvalidReasons...)}
-	case ResultFailed:
+	default: // ResultFailed（validateResultContract 已排除其他取值）
 		return &FailedError{Message: resp.Error}
-	default:
-		return &IncompleteError{Missing: "completed run result (status=" + string(resp.Status) + ")"}
 	}
 }

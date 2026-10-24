@@ -112,7 +112,7 @@ func (r *ResultReader) GetResult(ctx context.Context, runID string) (*analysis.B
 	case analysis.ResultFailed:
 		return nil, &analysis.FailedError{Message: out.Error}
 	default:
-		return nil, &analysis.IncompleteError{Missing: "K9 status (upstream result is not K9-correct; R1 pending)"}
+		return nil, &analysis.IncompleteError{Missing: "status", Detail: "upstream result is not K9-correct (R1 pending)"}
 	}
 }
 

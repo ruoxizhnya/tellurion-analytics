@@ -366,3 +366,18 @@ func TestReportNotFoundAndExportFormat(t *testing.T) {
 	out3, _ := io.ReadAll(resp3.Body)
 	wantCode(t, resp3.StatusCode, out3, http.StatusBadRequest, "invalid_params")
 }
+
+// run_result_incomplete 必须带机器可读的 missing（docs/api-schema.md §2 / §6），
+// 调用方不应解析自由文本 message。
+func TestIncompleteErrorCarriesMissingField(t *testing.T) {
+	srv, _ := newTestServer(t, analysis.Options{
+		Results: &stubReader{results: map[string]*analysis.BacktestResponse{
+			"empty": {Status: analysis.ResultCompleted},
+		}},
+	})
+	status, body := post(t, srv, "/api/analysis/metrics", `{"run_id":"empty"}`)
+	wantCode(t, status, body, http.StatusConflict, "run_result_incomplete")
+	if m := decode(t, body); m["missing"] != "portfolio_values" {
+		t.Fatalf("missing = %v, want portfolio_values", m["missing"])
+	}
+}

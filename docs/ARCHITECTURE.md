@@ -72,7 +72,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 | X4a | metrics + benchmark（同步） | 🔶 代码 + PG Store 已落；`ResultReader` / `BenchmarkReader` 已接（`-core-url` / `-data-url`），未配置仍 503 |
 | X4b | attribution（Brinson / 因子） | 🔶 代码已落；`HoldingsProvider` / `FactorExposureProvider` 已接 interim artifact 面（`-artifact-url`），R2 形状未冻结 |
 | X4c | sensitivity + montecarlo（异步 + seed） | 🔶 montecarlo 端到端可用（PG 持久化）；sensitivity 提交端就绪、X5b 队列未落地（503） |
-| X4d | 报告导出（html / csv；**pdf 未定**，§9.7 R5） | 🔶 html / csv 可用且确定性；pdf 未做 |
+| X4d | 报告导出（html / csv；**pdf 已裁为非目标**，§9.7 R5） | 🔶 html / csv 可用且确定性；pdf 不做 |
 
 ## 9. 接口对表（M8 前置 · ✅ 2026-10-22）
 
@@ -162,11 +162,11 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 | # | 事项 | 当前状态 | 建议 / 影响 |
 |---|---|---|---|
-| R1 | **K9-correct 的结果读取面**（F1） | 异步 invalid 落 failed 且丢结果；同步/异步两种编码。**本仓已接 interim 适配器**：`internal/upstream.ResultReader` 读 core 现有 `GET /api/backtest/{id}/report`，有 `status` 才映射三值；无 `status`（异步结果）⇒ `409 run_result_incomplete`，解析错误串的路径**零实现** | 建议二选一：(a) core job 层把 invalid 落成 `status=invalid` + 保留结果体（改 OBS-01 的落库口径）；(b) `run`/artifact 读取面（QT-44 / QT-63）提供 K9-correct 读取。R1 落地后只换适配器的 URL/路径，端口与 DTO 不变 |
-| R2 | **holdings / 因子暴露 artifact**（F2） | 结果 DTO 无逐标的持仓；`BacktestState` 只在内存。**本仓已按临时形状接 interim artifact 适配器**：`PortfolioSnapshot{holdings, benchmark_sector_weights, benchmark_sector_returns}`、`FactorExposures{factors[], dataset_hash}`（`internal/analysis/model.go`），HTTP 面 `GET /runs/{id}/portfolio-snapshot` / `/factor-exposures`；未配置即 503 | 定 artifact 形状与 owner（core 产、本仓读）后，把这两个临时 DTO 迁到 `tellurion-contracts` 的 analysis 包；**端口方法集不变**，形状变更走契约流程 |
+| R1 | **K9-correct 的结果读取面**（F1） | 异步 invalid 落 failed 且丢结果；同步/异步两种编码。**本仓已接 interim 适配器**：`internal/upstream.ResultReader` 读 core 现有 `GET /api/backtest/{id}/report`，有 `status` 才映射三值；无 `status`（异步结果）⇒ `409 run_result_incomplete`，解析错误串的路径**零实现**。消费端形状与失败语义已冻结为 **`UpstreamContractVersion=v1`**（`api-schema.md` §6.1） | 建议二选一：(a) core job 层把 invalid 落成 `status=invalid` + 保留结果体（改 OBS-01 的落库口径）；(b) `run`/artifact 读取面（QT-44 / QT-63）提供 K9-correct 读取。R1 落地后只换适配器的 URL/路径，端口与 DTO 不变 |
+| R2 | **holdings / 因子暴露 artifact**（F2） | 结果 DTO 无逐标的持仓；`BacktestState` 只在内存。**本仓已按临时形状接 interim artifact 适配器**：`PortfolioSnapshot{holdings, benchmark_sector_weights, benchmark_sector_returns}`、`FactorExposures{factors[], dataset_hash}`（`internal/analysis/model.go`），HTTP 面 `GET /runs/{id}/portfolio-snapshot` / `/factor-exposures`；未配置即 503。消费端形状已冻结为 **`UpstreamContractVersion=v1`**（`api-schema.md` §6.2：`dataset_hash` 与行业权重 / 收益必填） | 定 artifact 形状与 owner（core 产、本仓读）后，把这两个临时 DTO 迁到 `tellurion-contracts` 的 analysis 包；**端口方法集不变**，形状变更走契约流程 |
 | R3 | **sensitivity 的 job 队列**（F3） | QT-44 的 X5b 未落（`tellurion-orchestration` 施工记录：X5a/X5c 已落，batch/walkforward 未做）；本仓 `SensitivityQueue.Submit(report_id, run_id, grid)` 端口已就位，队列 nil ⇒ 503 | X4c 开工前拍；本仓只做提交与汇总，不做回测循环。逐点结果回填（`analysis.sensitivity_runs.points`）随 QT-44 的 `Complete` 载荷落地 |
 | R4 | **基准数据面与口径**（F4） | **X1b 已落**（`tellurion-data` `/datasets/resolve` + `/datasets/{hash}`）；本仓 `BenchmarkReader` 已接 X1b，按登记的 `adjustment_basis` 取数，basis 不一致即 409 | 保持 `adjustment_basis` 在登记身份里；若将来改走别的数据面，只换适配器 |
-| R5 | **PDF 导出** | 设计写了 pdf；core 现状只有 html（用浏览器打印） | 要么选渲染器并立 ADR，要么把 pdf 从目标面移除；**冻结前只承诺 html/csv** |
+| R5 | **PDF 导出** | **已裁（2026-10-24）= 非目标**：core 现状只有 html（用浏览器打印），无渲染器 | 从目标面移除；只承诺 html / csv（`api-schema.md` §1 / §4）。不引入渲染器、不立 ADR |
 | R6 | **鉴权角色矩阵** | QT-50 ④ 统一面未落定 | 本文只冻结「默认 fail-closed，无凭证不服务」；角色名与 401/403 body 随 QT-50 对齐 |
 
 ### 9.8 实现现状（2026-10-24，QT-43 施工 ②）

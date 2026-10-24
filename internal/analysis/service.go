@@ -178,6 +178,10 @@ func (s *Service) Attribution(ctx context.Context, req AttributionRequest) (Repo
 		if err != nil {
 			return Report{}, err
 		}
+		// 契约校验必须在算 input_hash 之前：缺 dataset_hash 时同键会复用旧报告。
+		if err := validatePortfolioSnapshot(snapshot); err != nil {
+			return Report{}, err
+		}
 		inputHash := hashInputs(resultHash, snapshot.DatasetHash)
 		if rep, ok, err := s.replay(ctx, req.RunID, TypeAttribution, paramsHash, inputHash, nil); err != nil || ok {
 			return rep, err
@@ -193,6 +197,10 @@ func (s *Service) Attribution(ctx context.Context, req AttributionRequest) (Repo
 		}
 		exposures, err := s.factors.GetFactorExposures(ctx, req.RunID)
 		if err != nil {
+			return Report{}, err
+		}
+		// 同 brinson：契约校验先于 input_hash，避免 artifact 换版复用旧报告。
+		if err := validateFactorExposures(exposures); err != nil {
 			return Report{}, err
 		}
 		inputHash := hashInputs(resultHash, exposures.DatasetHash)

@@ -48,7 +48,7 @@ verified-by: QT-43 施工 ②（PG Store / 启动迁移 / 上游读取端口接�
 2. **上游读取端口接线**：`ResultReader`（依赖 R1 的 K9-correct 读取面）、`BenchmarkReader`（R4 / X1b 或 interim adapter）、`HoldingsProvider` / `FactorExposureProvider`（R2 artifact 形状冻结后迁 contracts）。
 3. **sensitivity 逐点回填**：`SensitivityQueue` 只提交；`analysis.sensitivity_runs.points` 与完成态推进依赖 QT-44（R3）。
 4. **鉴权**：QT-50 ④ 统一面（R6）；当前进程仅回环监听。
-5. **PDF 导出**：R5 未裁，当前只承诺 html / csv。
+5. **PDF 导出**：**R5 已裁（2026-10-24）= 非目标**，只承诺 html / csv。
 6. **契约迁移**：本地 DTO 镜像待 `tellurion-contracts` 发布 `analysis` 包后迁走。
 
 **验收现状**：⑤ 的三条（同 run + 同 seed 两次结果一致、归因分项和 ≈ 总收益、缺 seed 拒绝）已在单测层面成立；**端到端**验收（真实 run + 真实基准 + 真实 DB）待上述 1/2 接线后才可执行，故本单保持 🔶。
@@ -77,11 +77,50 @@ verified-by: QT-43 施工 ②（PG Store / 启动迁移 / 上游读取端口接�
 1. **sensitivity 逐点回填**：`SensitivityQueue` 仍只提交；`analysis.sensitivity_runs.points` 与完成态推进依赖 G7 的 X5b（`tellurion-orchestration` QT-44：X5b 未做）。按派发要求「不到就停」，本次不预设载荷形状。
 2. **R1 的 K9-correct 持久读面**：core 侧尚未落地；当前适配器对同步结果可用、对无 `status` 的异步结果 fail-closed。R1 落地后只换 URL/路径，端口与 DTO 不变。
 3. **R2 artifact 形状与 owner**：wire 形状仍是本地临时镜像，未迁 contracts。
-4. **PDF 导出**：R5 未裁，只承诺 html / csv。
+4. **PDF 导出**：**R5 已裁（2026-10-24）= 非目标**，只承诺 html / csv。
 5. **鉴权**：QT-50 ④ 未落；进程仍只监听回环。
 6. **契约迁移**：`tellurion-contracts` 的 `analysis` 包未发布，本地 DTO 镜像未迁走。
 
-**验收现状**：⑤ 三条判据已在**真库 E2E** 层成立（不再是仅单测）；本单保持 🔶 —— sensitivity 逐点回填、R1/R2 契约化、PDF、鉴权仍未落，不写成已完成。
+**验收现状**：⑤ 三条判据已在**真库 E2E** 层成立（不再是仅单测）；本单保持 🔶 —— sensitivity 逐点回填、R1/R2 契约化、鉴权仍未落（PDF 已裁为非目标），不写成已完成。
+
+#### 施工记录（2026-10-25，施工 ③：QT-43 收口——R1/R2 契约化 + 鉴权现状登记）
+
+> 依据：R5（PDF）已裁为非目标（2026-10-24），本次只结剩余两项，不碰渲染器。
+
+**已落**
+
+1. **R1/R2 契约化（本地镜像 v1）**
+   - `internal/analysis/upstream_contract.go`：`UpstreamContractVersion = "v1"` + 三个校验器 —— `validateResultContract`（R1：`status` 必须是 K9 三值，缺失 / 未知即 `409`，**不解析错误串**）、`validatePortfolioSnapshot`（R2 Brinson）、`validateFactorExposures`（R2 因子）。
+   - 接进调用链：`requireResult`（所有读结果的端点）与 `Service.Attribution`。**校验点前移到算 `input_hash` 之前** —— 缺 `dataset_hash` 时同键会复用旧报告，只在计算函数里拦是不够的。
+   - 新增必填项（旧实现只查 `holdings` / `factors` 非空）：`holdings.dataset_hash`、`factor_exposures.dataset_hash`、`benchmark_sector_weights`、`benchmark_sector_returns`。理由：前两者进 `input_hash`（缺了假复用）；后两者缺失会被静默按 `0` 算出一份「看起来正常」的归因。
+   - 形状钉死：`TestUpstreamContractWireShape` 用 golden JSON 往返比对三个 DTO；`TestUpstreamContractArtifactFailClosed` 逐项钉必填；`TestServiceAttributionRequiresArtifactDatasetHash` 钉「拒算且不落库」。
+2. **`run_result_incomplete` 机器可读**
+   - `errorBody.Missing`（`omitempty`）：只有 `run_result_incomplete` 带，原样透出 `IncompleteError.Missing`；其余错误码不带。
+   - `IncompleteError` 拆成 `Missing`（稳定标识，进 wire）+ `Detail`（人读定位，**不进 wire**）。原先混在 `Missing` 里的人读后缀（`"equity_curve of r2 (need >= 3 points)"`、`"K9 status (...)"`）已拆开，`missing` 现在是**闭集**（`api-schema.md` §6.3，12 个取值）。
+   - 用例：`TestIncompleteErrorCarriesMissingField`（400/409 侧断言 `missing=portfolio_values`）。
+3. **鉴权现状登记**
+   - `internal/httpapi/auth_status.go`：`AuthStatus = "unwired"`；`TestAuthNotWiredCurrentState` 是**可执行锚点** —— 无凭证与伪造 `Bearer` 均断言 `200`，接线鉴权时该用例转红，届时改写而非删除。
+   - `api-schema.md` 新增 §7（现状 / 安全边界 / 接线清单），并把 §2 的 401 / 403 两行显式标成「目标态，当前未实现」—— 不让人把目标当现状。
+4. **契约文档**
+   - `api-schema.md` §6（新增）：R1 结果面 / R2 artifact 面的字段表、必填项、版本策略（加字段 = MINOR，改名 / 删字段 = breaking）、fail-closed 规则；§6.3 是 `missing` 的唯一词表。
+   - `api-schema.md` §1 / §4 与 `ARCHITECTURE.md` §8 / §9.7 R5：PDF 记为**已裁非目标**，三处口径一致。
+
+**破坏验证（本次）**
+
+- 改坏：`PortfolioSnapshot.DatasetHash` 的 wire tag 由 `dataset_hash` 改成 `dataset_hash_v2`（`internal/analysis/model.go`）。
+- 应红：`go test ./internal/analysis -run TestUpstreamContract -count=1` → `FAIL's TestUpstreamContractWireShape/R2_portfolio_snapshot`，diff 显示重编码后多出 `"dataset_hash_v2":""`、少了 `"dataset_hash":"h1"`。
+- 还原：备份逐字节拷回；`model.go` SHA-256 改前 / 还原后同为 `C5C63B682CF57529B5F55162CB9272A0CA9B63A08FC724492E91CDCCB5AAD0DA`。
+- 应绿：同一命令 → `ok tellurion-analytics/internal/analysis`。
+
+**未落（如实登记，不算完成；本单仍 🔶）**
+
+1. **R1 的 K9-correct 持久读面**：核心在 core 侧（`ARCHITECTURE.md` §9.7 R1），本仓仍是 interim 适配器（读 core 现有 report 端点）。本次只是把**消费端形状与失败语义**冻结成 v1，不等于 R1 落地。
+2. **R2 artifact 的 owner 与最终形状**：本次冻结的是「本仓读它」的契约版本，owner 未定、**未迁 `tellurion-contracts`**（该仓 `analysis` 包未发布）。迁移时端口方法集与校验语义不变。
+3. **sensitivity 逐点回填**：`SensitivityQueue` 仍只提交，`analysis.sensitivity_runs.points` 与完成态推进依赖 QT-44（X5b 未做）。
+4. **鉴权**：本次只做**现状登记**（常量 + 可执行锚点 + 文档），**未接线任何鉴权中间件**，不产出 401 / 403；安全边界仍是回环监听。
+5. **PDF**：非目标，不做。
+
+**验收现状**：`go build ./...` / `go vet ./...` / `go test ./...` 全绿（输出见提交说明）；⑤ 三条判据维持真库 E2E 层成立。本单保持 🔶，原因已从「R1/R2 契约化 + 鉴权」收窄为「R1 持久读面、R2 owner / contracts 迁移、sensitivity 回填、鉴权接线」。
 
 ---
 
@@ -101,7 +140,7 @@ verified-by: QT-43 施工 ②（PG Store / 启动迁移 / 上游读取端口接�
 | X4a | metrics + benchmark（同步，只读上游） | `QT-43` | 本仓立项 |
 | X4b | attribution（Brinson / 因子） | `QT-43` | X4a |
 | X4c | sensitivity + montecarlo（异步 job，`seed` 必填） | `QT-43` | X4a |
-| X4d | 报告导出（html / csv；**pdf 未定**，见 `ARCHITECTURE.md` §9.7 R5） | `QT-43` | X4b |
+| X4d | 报告导出（html / csv；**pdf 已裁为非目标**，R5 2026-10-24） | `QT-43` | X4b |
 
 ## 二、跨仓指针（不在本仓，勿双写）
 

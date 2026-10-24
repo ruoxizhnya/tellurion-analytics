@@ -38,8 +38,8 @@ type AttributionPayload struct {
 
 // buildFactorAttribution 计算因子归因：贡献 = 暴露 × 因子收益，残差兜差额。
 func buildFactorAttribution(resp *BacktestResponse, exposures FactorExposures) (AttributionPayload, error) {
-	if len(exposures.Factors) == 0 {
-		return AttributionPayload{}, &IncompleteError{Missing: "factor_exposures"}
+	if err := validateFactorExposures(exposures); err != nil {
+		return AttributionPayload{}, err
 	}
 	factors := append([]FactorExposure(nil), exposures.Factors...)
 	sort.Slice(factors, func(i, j int) bool { return factors[i].Name < factors[j].Name })
@@ -67,8 +67,8 @@ func buildFactorAttribution(resp *BacktestResponse, exposures FactorExposures) (
 // 三者之和 = 组合收益 - 基准收益（行业权重合为 1 时）。
 // residual 吸收 artifact 与结果口径的差异，**不摊进**分项。
 func buildBrinsonAttribution(resp *BacktestResponse, snapshot PortfolioSnapshot) (AttributionPayload, error) {
-	if len(snapshot.Holdings) == 0 {
-		return AttributionPayload{}, &IncompleteError{Missing: "holdings"}
+	if err := validatePortfolioSnapshot(snapshot); err != nil {
+		return AttributionPayload{}, err
 	}
 
 	type sectorAgg struct {
