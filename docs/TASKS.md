@@ -170,7 +170,7 @@ verified-by: R1 换面（ResultReader 接 core B6-3 持久读面 + 对表用例 
 
 **E2E（真进程 + 真库）**
 
-- `TestSensitivityEndToEndWithOrchestrationProcess`：`go build` 真 orchestration 进程 + PG 16（WSL）→ 提交 → 父作业 pending → 报告 pending → 执行侧写回汇总（**唯一模拟环节**：worker 尚未落地，用 SQL 写 `run.parent_jobs` 的 `status/completed/summary_json`）→ 报告 completed、逐点回填、参数顺序正确。**PASS**。
+- `TestSensitivityEndToEndWithOrchestrationProcess`：`go build` 真 orchestration 进程 + PG 16（WSL）→ 提交 → 父作业 pending → 报告 pending → 执行侧写回汇总（**W8 当时 worker 尚未落地，用 SQL 写 `run.parent_jobs`**；**2026-10-25 H5 已替换**，见下方 H5 记录）→ 报告 completed、逐点回填、参数顺序正确。**PASS**。
 - `TestSensitivityEndToEndWithFakeParent`：恒常运行的契约级 E2E（严格按 W6 wire）。
 - `TestEndToEndWithPostgres` / `TestPGSensitivityBackfill`：真库下落库与回填不可变。**PASS**。
 
@@ -193,6 +193,29 @@ verified-by: R1 换面（ResultReader 接 core B6-3 持久读面 + 对表用例 
 2. **`base_run_spec` 只有 `run_id`**：完整 RunSpec 的装配属执行侧（R3 未裁），当前锚点只保证计划身份可算、网格可展开。
 3. **失败报告的逐点 error 只在 `error` 文本 + `analysis.sensitivity_runs.points`**：报告体仍遵守「completed 才有 body」的 DDL 约束，API 不单独暴露 failed 报告的 points。
 4. ~~R1 持久读面~~（**2026-10-25 R1 换面已结清**，见下方记录）、R2 owner / contracts 迁移、token 分发仍按上一条记录未落。
+
+#### 施工记录（2026-10-25，H5：真进程 E2E 改走 worker HTTP 协议，去掉 SQL 模拟）
+
+**已落**
+
+1. **去模拟**：删除 `sensitivity_e2e_test.go` 的 `seedParentSummary` —— 不再直接用 SQL 改 `run.parent_jobs`。父汇总的推进改为真实链路：本仓注册 worker → 领取子 run → `POST /api/runs/jobs/{id}/result` 上报 `completed` → 编排服务内部调 `parents.SyncSummary` 写回父汇总。
+2. **仍然只读**：本仓没有执行回测，`result_uri` 用 `test://<run_id>` 占位；真实执行在 core 的 `cmd/worker`（`tellurion` 仓），本仓不 import 它。
+3. **共享队列残留**：worker 把领到的每个子 run 都上报完，只收集属于本次父作业的——上一次失败运行遗留的 pending 子 run 会被后续运行顺手清掉，不再造成假红（清理后**连续两次**运行均 PASS）。
+
+**门禁（真实输出，WSL Go 1.25.0 + PG 16；`ANALYTICS_TEST_DSN` / `ORCHESTRATION_TEST_DSN` / `ORCHESTRATION_REPO` 均设置）**
+
+- `gofmt -l .` 空；`go build ./...` / `go vet ./...` exit 0；`go test ./... -count=1` 全绿：`internal/analysis 0.470s`、`internal/httpapi 2.837s`、`internal/upstream 0.160s`。
+- `go test ./internal/httpapi -run 'TestSensitivityEndToEndWith' -v` → `TestSensitivityEndToEndWithFakeParent PASS (0.01s)`、`TestSensitivityEndToEndWithOrchestrationProcess PASS (2.43s)`——**真进程腿实跑，不是 skip**。
+
+**破坏验证（一条腿，改坏 → 红 → 逐字节还原 → 绿）**
+
+- 改坏：`settleParentThroughWorker` 的领取循环在第一次上报后直接 `return`（只报一个子 run）。
+- 应红：`TestSensitivityEndToEndWithOrchestrationProcess`（父记录停在 `running` / 逐点回填不足 2 点）。
+- 还原：`sensitivity_e2e_test.go` 的 sha256 改前 / 还原后同为 `21e1e67031b459f2a4896b37a0459bdfcebb92feeb445950af8f97ac24bc5930`（逐字节相同），复跑绿。
+
+**未落（如实）**
+
+- 本仓仍不执行回测；E2E 的 worker 用 `test://` 结果 URI。真实引擎 + data-service 的端到端在 core 侧仍是替身引擎（见 `tellurion:docs/TASKS.md` QT-44 记录）。
 
 #### 施工记录（2026-10-25，R1 换面：`ResultReader` 接 core 持久读面）
 

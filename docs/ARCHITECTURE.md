@@ -71,7 +71,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 |---|---|---|
 | X4a | metrics + benchmark（同步） | 🔶 代码 + PG Store 已落；`ResultReader` 已接 **core R1 持久读面**（`-core-url`，§9.7 R1）、`BenchmarkReader` 已接 X1b（`-data-url`），未配置仍 503 |
 | X4b | attribution（Brinson / 因子） | 🔶 代码已落；`HoldingsProvider` / `FactorExposureProvider` 已接 interim artifact 面（`-artifact-url`），R2 形状未冻结 |
-| X4c | sensitivity + montecarlo（异步 + seed） | 🔶 montecarlo 端到端可用（PG 持久化）；sensitivity 已接 X5b（提交 + 逐点回填，W8），执行侧 worker 未落 |
+| X4c | sensitivity + montecarlo（异步 + seed） | 🔶 montecarlo 端到端可用（PG 持久化）；sensitivity 已接 X5b（提交 + 逐点回填，W8）。**执行侧 worker 已在 core 落地**（`tellurion:cmd/worker`，QT-44 core 腿 2026-10-25）：本仓 E2E 经真实 worker 协议（注册 / 领取 / 上报）驱动父汇总，不再 SQL 模拟 |
 | X4d | 报告导出（html / csv；**pdf 已裁为非目标**，§9.7 R5） | 🔶 html / csv 可用且确定性；pdf 不做 |
 
 ## 9. 接口对表（M8 前置 · ✅ 2026-10-22）
@@ -164,7 +164,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 |---|---|---|---|
 | R1 | **K9-correct 的结果读取面**（F1） | ✅ **已落（core B6-3 `8537ffd`，2026-10-25）**：`backtest_jobs.result_status` 持久化 K9 结论，`GET /api/backtest/{id}/report` 以该列为 `status` 的唯一权威（列 → 结果体 → completed），`completed/invalid` 行返 200 不再 404。本仓 `internal/upstream.ResultReader` 换到这一面：**URL 与 DTO 都没变**（正是本节原先写的「只换面，端口不变」），缺 `status` 的分支保留但语义改成「上游没升到 B6-3」。**残留偏差**（`api-schema.md` §6.1）：端点仍按**队列态**放行 ⇒ pending / running 与引擎故障行（`failed`/`failed`）读成 `404 run_not_found`，K9 的 `failed` 经持久面到不了 409；Migration 059 把迁移前的完成行回填成 `completed`，旧 invalid 读不回 | 消费端已由 `TestResultReader_PersistentK9ReadPlane` 按 core 的 overlay 建模钉住。要把两条偏差变成正确语义，得先裁「读面按队列态还是结论态放行」——属 core 侧改动，不在本仓猜 |
 | R2 | **holdings / 因子暴露 artifact**（F2） | 结果 DTO 无逐标的持仓；`BacktestState` 只在内存。**本仓已按临时形状接 interim artifact 适配器**：`PortfolioSnapshot{holdings, benchmark_sector_weights, benchmark_sector_returns}`、`FactorExposures{factors[], dataset_hash}`（`internal/analysis/model.go`），HTTP 面 `GET /runs/{id}/portfolio-snapshot` / `/factor-exposures`；未配置即 503。消费端形状已冻结为 **`UpstreamContractVersion=v1`**（`api-schema.md` §6.2：`dataset_hash` 与行业权重 / 收益必填） | 定 artifact 形状与 owner（core 产、本仓读）后，把这两个临时 DTO 迁到 `tellurion-contracts` 的 analysis 包；**端口方法集不变**，形状变更走契约流程 |
-| R3 | **sensitivity 的 job 队列**（F3） | **已落（2026-10-25，W8）**：orchestration 的 X5b 父端点（W6）已接；本仓 `SensitivityQueue` = `Submit` + `Status`，`analysis.sensitivity_runs.points` 按父汇总逐点回填；未配置 `-orchestration-url` 仍 503 | 执行侧（worker）与完整 RunSpec 的装配仍不在本仓：`base_run_spec` 目前只带 `run_id` 锚点，worker 落地后如需完整 spec 由执行侧解析（契约变更走 R3 重裁） |
+| R3 | **sensitivity 的 job 队列**（F3） | **已落（2026-10-25，W8）**：orchestration 的 X5b 父端点（W6）已接；本仓 `SensitivityQueue` = `Submit` + `Status`，`analysis.sensitivity_runs.points` 按父汇总逐点回填；未配置 `-orchestration-url` 仍 503 | 执行侧装配不在本仓（仍正确）：`base_run_spec` 只带 `run_id` 锚点，**core worker 的 `AnchorResolver` 负责从 core 的 `backtest_jobs` 恢复完整请求**；锚点形状不变，无需契约变更 |
 | R4 | **基准数据面与口径**（F4） | **X1b 已落**（`tellurion-data` `/datasets/resolve` + `/datasets/{hash}`）；本仓 `BenchmarkReader` 已接 X1b，按登记的 `adjustment_basis` 取数，basis 不一致即 409 | 保持 `adjustment_basis` 在登记身份里；若将来改走别的数据面，只换适配器 |
 | R5 | **PDF 导出** | **已裁（2026-10-24）= 非目标**：core 现状只有 html（用浏览器打印），无渲染器 | 从目标面移除；只承诺 html / csv（`api-schema.md` §1 / §4）。不引入渲染器、不立 ADR |
 | R6 | **鉴权角色矩阵** | **已裁（2026-10-25）**：6 个 POST = trader、2 个 GET = viewer；机制在 kit `auth/httpadapter`，策略表在本仓 `internal/httpapi/policy.go`（ADR-0003） | 全端点 fail-closed；无 secret + 非回环拒绝启动 |
@@ -200,7 +200,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 | benchmark | ✅ | `ResultReader` + `BenchmarkReader`（X1b）已接 | 已接 |
 | attribution (brinson) | ✅（临时形状） | `ResultReader` + `HoldingsProvider`（interim artifact）已接 | 已接 |
 | attribution (factor) | ✅（临时形状） | `ResultReader` + `FactorExposureProvider`（interim artifact）已接 | 已接 |
-| sensitivity | ✅ | `ResultReader` + `SensitivityQueue`（X5b）已接 | 已接（提交 + 逐点回填；执行侧 worker 未落） |
+| sensitivity | ✅ | `ResultReader` + `SensitivityQueue`（X5b）已接 | 已接（提交 + 逐点回填；执行侧 = core `cmd/worker`，2026-10-25） |
 | montecarlo | ✅ | `ResultReader` 已接；**其余本仓自足** | 已接（PG 持久化） |
 | correlation | ✅ | `ResultReader` 已接 | 已接 |
 | GET report / export | ✅ | 无 | **可用**（需先有报告） |
@@ -211,7 +211,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 2. **PG 是生产 Store，Memory 只做测试 / 无库本地装配**：启动时给了 DSN 就连接 + 迁移；空 DSN 会打 WARNING。`completed` 不可变由应用层 + DB 触发器双保险（ADR-0002）。
 3. **R1 已落 ⇒ `ResultReader` 读的是持久读面**（2026-10-25，core B6-3 `8537ffd`）：`status` 的唯一权威是 `backtest_jobs.result_status`，缺 `status` 只剩「上游没升到 R1」一种含义，照旧 fail-closed、**不解析错误串**；URL / DTO / 端口方法集都没动（§9.7 R1 原先的预期成立）。残留两条偏差如实登记：读面按**队列态**放行（pending / running / 引擎故障行 ⇒ 404），Migration 059 把迁移前的完成行回填成 `completed`。
 4. **R2 未裁 ⇒ artifact 形状是临时的**：`GET /runs/{id}/portfolio-snapshot` / `/factor-exposures` 是 interim wire 形状；owner 与最终形状定了再迁 contracts，端口不变。
-5. **sensitivity 的 points 由父汇总驱动（2026-10-25）**：`base_run_spec` 只带 `run_id` 锚点，网格交给 X5b；`points` 只能从 NULL 一次写满，缺 point 就整份失败（不补、不猜）。执行侧（worker）与完整 RunSpec 装配不在本仓。
+5. **sensitivity 的 points 由父汇总驱动（2026-10-25）**：`base_run_spec` 只带 `run_id` 锚点，网格交给 X5b；`points` 只能从 NULL 一次写满，缺 point 就整份失败（不补、不猜）。执行侧 worker 在 core（`cmd/worker`）：它按锚点恢复完整 RunSpec、用 core 引擎执行、把 K9 结论上报编排侧；本仓仍不执行回测。
 6. **鉴权已接线（2026-10-25）**：kit `auth/httpadapter` + 本仓策略表，全端点 401/403/503 fail-closed（ADR-0003）。
 7. **`Migrations()` 只返回副本**，没有「按版本号执行 / 回滚」——与 core / risk 同一取向（`docs/db-schema.md` §4）。
 

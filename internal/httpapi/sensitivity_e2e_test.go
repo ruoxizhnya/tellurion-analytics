@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,10 +13,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"tellurion-analytics/internal/analysis"
 	"tellurion-analytics/internal/upstream"
@@ -113,9 +113,11 @@ func (f *fakeParentState) settle() { f.settled = true }
 // （`go build` + `cmd/orchestrationservice`），验证提交 / 轮询 / 回填全链路。
 //
 // 前置：orchestration 按设计拒绝无库启动，故仅在 `ORCHESTRATION_TEST_DSN` 有值时
-// 运行（CI 无 PG 会 skip）。执行侧（worker）尚未落地，父记录的汇总由本用例
-// 通过 SQL 模拟「执行侧调用 ApplyBatchSummary 后的落库形状」——这是唯一被模拟的
-// 环节，HTTP 与父表读取都是真的。
+// 运行（CI 无 PG 会 skip）。
+//
+// 执行侧不再用 SQL 模拟（2026-10-25 H5 收口）：本用例经 orchestration 的
+// **worker 打活面**（注册 → 领取 → 上报结论）把子 run 跑到终态，父汇总由
+// 编排服务在收到上报时真实重算。本仓仍然只提交与读取，不执行回测。
 func TestSensitivityEndToEndWithOrchestrationProcess(t *testing.T) {
 	dsn := os.Getenv("ORCHESTRATION_TEST_DSN")
 	if dsn == "" {
@@ -184,8 +186,9 @@ func TestSensitivityEndToEndWithOrchestrationProcess(t *testing.T) {
 		t.Fatalf("before workers report: %v", rep)
 	}
 
-	// 模拟执行侧：把父记录推进到 completed，并按计划顺序写回逐点结论。
-	seedParentSummary(t, dsn, parentID, 2)
+	// 执行侧：经 orchestration 的 worker 协议把两个子 run 跑到 completed。
+	// 父汇总由编排服务在上报时重算——不再直接 UPDATE run.parent_jobs。
+	claimed := settleParentThroughWorker(t, "http://"+addr, parentID)
 
 	_, raw = get(t, srv, "/api/analysis/reports/"+reportID)
 	rep := decode(t, raw)
@@ -197,6 +200,9 @@ func TestSensitivityEndToEndWithOrchestrationProcess(t *testing.T) {
 	if len(points) != 2 {
 		t.Fatalf("points = %v", report["points"])
 	}
+	if len(claimed) != 2 {
+		t.Fatalf("worker claimed %d children, want 2", len(claimed))
+	}
 	second, _ := points[1].(map[string]any)
 	params, _ := second["params"].(map[string]any)
 	if params["lookback"] != float64(20) {
@@ -204,46 +210,66 @@ func TestSensitivityEndToEndWithOrchestrationProcess(t *testing.T) {
 	}
 }
 
-// seedParentSummary 模拟执行侧写回父汇总（W6 的 ApplyBatchSummary 落库形状）。
-func seedParentSummary(t *testing.T, dsn, parentID string, total int) {
+// settleParentThroughWorker 按生产协议扮演执行侧：注册 → 逐条领取 → 上报
+// completed。它不碰 SQL，也不执行回测——本仓的 E2E 只证明「父汇总由真实上报
+// 驱动」，不证明 core 引擎跑得对（那是 core 自己的测试）。
+func settleParentThroughWorker(t *testing.T, baseURL, parentID string) []string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect orchestration db: %v", err)
+	client := &http.Client{Timeout: 10 * time.Second}
+	post := func(path, body string) (int, []byte) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, baseURL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("build %s: %v", path, err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		raw, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, raw
 	}
-	defer pool.Close()
 
-	tasks := make([]map[string]any, total)
-	for i := range tasks {
-		tasks[i] = map[string]any{
-			"run_id":        fmt.Sprintf("%s-child-%d", parentID, i+1),
-			"result_status": "completed",
-			"duration_ms":   1,
-			"rank":          i + 1,
+	const workerID = "analytics-e2e-worker"
+	status, body := post("/api/runs/workers", fmt.Sprintf(`{"worker_id":%q,"kernels":[]}`, workerID))
+	if status != http.StatusOK {
+		t.Fatalf("register worker = %d %s", status, body)
+	}
+
+	claimed := make([]string, 0, 2)
+	for {
+		status, body = post("/api/runs/workers/"+workerID+"/claim", "")
+		if status != http.StatusOK {
+			t.Fatalf("claim = %d %s", status, body)
+		}
+		var out struct {
+			Job *struct {
+				RunID       string `json:"run_id"`
+				ParentJobID string `json:"parent_job_id"`
+			} `json:"job"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("decode claim: %v (%s)", err, body)
+		}
+		if out.Job == nil {
+			break
+		}
+		// 共享队列不按父作业分片：别的父作业遗留的子 run 也可能被领到（上一次
+		// 失败运行的残留）。worker 的职责是把领到的都上报完，本用例只收集属于
+		// 本次父作业的那些；见到未知父作业不当作本用例的失败。
+		if out.Job.ParentJobID == parentID {
+			claimed = append(claimed, out.Job.RunID)
+		}
+		report := fmt.Sprintf(`{"worker_id":%q,"status":"completed","result_status":"completed","result_uri":"test://%s"}`,
+			workerID, out.Job.RunID)
+		status, body = post("/api/runs/jobs/"+out.Job.RunID+"/result", report)
+		if status != http.StatusOK {
+			t.Fatalf("report %s = %d %s", out.Job.RunID, status, body)
 		}
 	}
-	summary, err := json.Marshal(map[string]any{
-		"Counts": map[string]any{"Total": total, "Completed": total, "Invalid": 0, "Failed": 0, "Pending": 0},
-		"Status": "completed",
-		"Tasks":  tasks,
-	})
-	if err != nil {
-		t.Fatalf("marshal summary: %v", err)
-	}
-	tag, err := pool.Exec(ctx,
-		`UPDATE run.parent_jobs
-		    SET status = 'completed', completed = $2, invalid = 0, failed = 0,
-		        summary_json = $3::jsonb, completed_at = now()
-		  WHERE parent_job_id = $1`,
-		parentID, total, string(summary))
-	if err != nil {
-		t.Fatalf("seed parent summary: %v", err)
-	}
-	if tag.RowsAffected() != 1 {
-		t.Fatalf("parent %s not found in run.parent_jobs", parentID)
-	}
+	return claimed
 }
 
 func freeAddr(t *testing.T) string {
