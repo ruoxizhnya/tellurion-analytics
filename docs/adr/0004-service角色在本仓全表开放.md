@@ -14,3 +14,10 @@
   2. 本仓策略表从此承认第四种角色名，后续新增端点必须**显式决定**开不开 `service`——守卫用例 `TestPolicy_ServiceRoleDeclaredOnEveryRoute` 钉住「全表都开」，新增端点若忘了表态就红（逼着做一次决定，而不是默默不开）。
   3. 守卫用例用 kit `IssueTokens` 签**数字 subject** 的 token（`subject="1"`）来跑通角色判定，因为生产形状的 token 目前过不了 kit 的 subject 守卫（见上）。本仓**不**实现任何绕过 kit 守卫的旁路——那是 kit 的机制语义。
 - **替代关系**：扩展 0003（鉴权接入：kit net/http 适配 + 本仓策略表）——机制（kit 适配 + 本仓策略表）不变，本条只定 `service` 角色的**适用范围**；0003 §3 的角色口径按本条补充。
+
+## 追加（2026-10-25，kit `KT-11` / `v0.1.4`）· 决策 5 与代价 1/3 的「未闭合」口径作废
+
+- **决策 5「不因这个角色升 kit 版本，本仓仍 pin `v0.1.1`」——后半句作废**。前半句的理由（`Authorize` 只按 `kind=access` + 角色 any-of 判定，角色是串不是枚举）**仍然成立**；升 pin 的原因在别处：`v0.1.1` 的 `authenticate()` 在进策略表**之前**无条件要求 `claims.UserIDInt64()`，而裁-17 的口径是 `sub=service:<repo>`（非数字）⇒ 真·服务 token 恒 401，本仓策略表里那条 `service` 档位在生产形状下**一次都没被读到**。
+- **代价 1（跨仓缺口）已闭合**：kit `v0.1.4` 只对 `claims.Role == auth.ServiceRole` 豁免 subject 的 `int64` 要求，其余非数字 subject 仍 401，且不伪造 user id。本仓 pin 随之升到 `v0.1.4`。
+- **代价 3（守卫用例用数字 subject）——仍然成立，别读成「已证链路通」**：用例形状没变，它证明的还是**本仓策略表**；「core 真进程 → 本仓真进程 → `sub=service:core`」这条端到端腿仍未跑，且 `JWT_SECRET` 与调用方 token 的配发属 core QT-71（跨仓，未落）。
+- **决策 1–4、全表开放口径、`TestPolicy_ServiceRoleDeclaredOnEveryRoute` 这条守卫都不受本追加影响。**

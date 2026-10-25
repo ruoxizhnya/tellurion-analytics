@@ -147,6 +147,12 @@ verified-by: H6（R2 owner 落本仓 + 触发条件成文于 api-schema §6.4；
 
 **验收**：`go build ./... && go vet ./... && go test ./... -count=1` 全绿。
 
+> **订正（2026-10-25，随 kit `KT-11` / `v0.1.4`）**：上面第 1、6 步写的「kit `v0.1.1`」是**当时的 pin**，今天已升到 `v0.1.4`。
+> 升的理由不是「策略表要用 `service` 角色」（`Authorize` 是角色串精确 any-of，`v0.1.1` 就够），而是**同一条 token 过不过得了 `Authenticate`**：
+> `v0.1.1` 无条件要求 `claims.UserIDInt64()`，而裁-17 口径的 `sub=service:<repo>` 非数字 ⇒ 服务 token 在进入本仓策略表之前就 401。
+> 本仓守卫用例用 `IssueTokens` 签**数字 subject** + `role=service`，因此它当时绿、并不能证明生产形状走得通——详见「QT-43 未落项」第 2 条。
+> **本轮验收边界**：本机无 Go 工具链（`go` 不在 PATH），上述 `go build/vet/test` 结论**未在本机复跑**；升 pin 这笔的证据取 CI 退出码。
+
 **未落（本单仍 🔶）**
 
 1. ~~**R1 的 K9-correct 持久读面**：核心在 core 侧，本仓仍是 interim 适配器（见上一条施工记录）。~~（**2026-10-25 已结清**：core B6-3 落了持久读面，本仓已换面，见下方「R1 换面」记录）
@@ -314,12 +320,12 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 **未落（如实登记）**
 
 1. **token 的签发与分发在 core / 运维侧（跨仓，本仓不落）**：本仓只保证「**有 token 就能用**」——不造 token、不存 token、不分发 token、不建服务账号注册表。签发入口是 kit `v0.1.2` 的 `IssueServiceToken`；注入靠 core `deploy/k8s/analytics-deployment.yaml` 的 `secretKeyRef`（core QT-71 ⑦，本仓无部署面）。派发明令**不许在本仓造 token 分发机制**。
-2. ⚠️ **已知跨仓缺口（不在本仓，本条是本单最需要被下游知道的一条）**：kit `auth/httpadapter.Authenticate`（`v0.1.1` ~ `v0.1.3` 三个版本实测一致）要求 subject 可解析为 `int64`，而裁-17 的生产口径 `sub=service:<repo>` 是**非数字** subject ⇒ 生产 token 会被 kit 判 401「malformed token subject」，**压根到不了本仓的角色判定**。⇒ 本仓的守卫用例证明的是**本仓策略表**正确，**不**证明生产 token 能走通。core 的 `pkg/auth` 已为 service token 开特例（`RoleService` 分支不解析 user id），**net/http 适配这一侧还没有**。该缺口归 kit（放宽 subject 校验）或改裁-17 的 subject 口径，**已报协调者**（与 `tellurion-risk` 的同型缺口同一处，risk 侧记在其 ADR-0006 ④；kit 侧记在其 `docs/TASKS.md` KT-09 结案记录的「跨仓前置（未落）」条）。
+2. ~~⚠️ **已知跨仓缺口（不在本仓，本条是本单最需要被下游知道的一条）**：kit `auth/httpadapter.Authenticate`（`v0.1.1` ~ `v0.1.3` 三个版本实测一致）要求 subject 可解析为 `int64`，而裁-17 的生产口径 `sub=service:<repo>` 是**非数字** subject ⇒ 生产 token 会被 kit 判 401「malformed token subject」，**压根到不了本仓的角色判定**。⇒ 本仓的守卫用例证明的是**本仓策略表**正确，**不**证明生产 token 能走通。core 的 `pkg/auth` 已为 service token 开特例（`RoleService` 分支不解析 user id），**net/http 适配这一侧还没有**。该缺口归 kit（放宽 subject 校验）或改裁-17 的 subject 口径，**已报协调者**（与 `tellurion-risk` 的同型缺口同一处，risk 侧记在其 ADR-0006 ④；kit 侧记在其 `docs/TASKS.md` KT-09 结案记录的「跨仓前置（未落）」条）。~~ **✅ 已闭合（2026-10-25，kit `KT-11` / `v0.1.4`，本仓 pin 已升）**：kit 现在只对 `claims.Role == auth.ServiceRole` 豁免「subject 须是 `int64`」，其余非数字 subject 仍 401（不伪造 user id，调用方看到 nil/零 uid）。**本仓动作 = 升 pin `v0.1.1` → `v0.1.4`**（`go.sum` 两行取自 `sum.golang.org`；`v0.1.4/go.mod` hash 与 `v0.1.1` 逐字节相同 ⇒ 依赖图未变）。**闭合的证据是 kit 侧 CI 退出码，不是本机复跑**（本机无 Go 工具链）。**仍然未证的**：本仓守卫用例用的是数字 subject + `role=service`，它证明策略表；「core 真进程 → 本仓真进程 → `sub=service:core` 走通」那条端到端腿仍未跑（第 1 条的配发腿在 core QT-71）。
 3. **本仓未消费 contracts**：`go.mod` 零 contracts 依赖（守卫 `TestUpstreamContractOwnerStaysLocal` 钉住）。这不是「等契约发布就迁走」的临时态——owner 已裁 = 本仓（裁决 ③）。
 4. **R1 的两条 core 侧残留偏差**（队列态放行 ⇒ pending / running 与引擎故障行读成 `404 run_not_found`；Migration 059 把迁移前的完成行回填成 `completed`）**仍不在本仓**，要修先裁「读面按队列态还是结论态放行」，改在 core。
 5. **本轮仍没有真 core 进程 + 真 PG 的 invalid 行端到端**（沿用 R1 换面记录的缺口，本轮两腿都没碰这条链路）。
 
-**验收现状**：QT-43 的 ⑤ 三条判据维持**真库 E2E** 层成立；本单仍保持 🔶，未落项收窄为「token 分发的跨仓腿（R1 的两条 core 侧残留偏差、真 core 进程的 invalid 行端到端、kit 的 service token subject 缺口）」。
+**验收现状**：QT-43 的 ⑤ 三条判据维持**真库 E2E** 层成立；本单仍保持 🔶，未落项收窄为「token 分发的跨仓腿（R1 的两条 core 侧残留偏差、真 core 进程的 invalid 行端到端）」——原列在第 3 项的「kit 的 service token subject 缺口」已由 kit `KT-11` / `v0.1.4` 闭合、本仓 pin 已升（见未落项第 2 条）。
 
 ---
 
