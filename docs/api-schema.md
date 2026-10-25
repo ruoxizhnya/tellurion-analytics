@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-25
-verified-by: R1 换面（§6.1 `status` 权威 = core `result_status` + 残留偏差；R2 前置实测 contracts `v0.6.0` 无 `analysis` 包）
+last-verified: 2026-10-26
+verified-by: H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` 服务间角色入策略表，ADR-0004）
 ---
 
 # API Schema — tellurion-analytics
@@ -13,9 +13,9 @@ verified-by: R1 换面（§6.1 `status` 权威 = core `result_status` + 残留�
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
 > 跨仓消费方（core / agent / ui / 其他服务）按本文件编码，**不读本仓实现**。
 > **请求 / 响应形状**：本文只冻结**路径、错误码、幂等与兼容**；逐端点的目标签名、DTO 字段与版本策略见 `ARCHITECTURE.md` §9（M8 接口对表），两处必须同步改，不复制形状。
-> **鉴权（2026-10-25 已接线，ADR-0003）**：机制在 kit `v0.1.1` 的 `auth/httpadapter`（Bearer → `Parse` →
+> **鉴权（2026-10-25 已接线，ADR-0003；2026-10-26 加 `service` 档，ADR-0004）**：机制在 kit `v0.1.1` 的 `auth/httpadapter`（Bearer → `Parse` →
 > `kind=access` → 角色 any-of），策略表在本仓 `internal/httpapi/policy.go`；**全部端点**过闸且 fail-closed：
-> 未装配 Authorizer → 503，无凭证 / 坏 token → 401，越权 → 403。6 个 POST = trader，2 个 GET = viewer。
+> 未装配 Authorizer → 503，无凭证 / 坏 token → 401，越权 → 403。6 个 POST = trader（+ admin + **service**），2 个 GET = viewer（+ trader + admin + **service**）。
 > 无 secret + 回环 = 开放；无 secret + 非回环 = **拒绝启动**。现状登记见 §7。
 > **前置现状**：sensitivity 的父作业队列走 G7/X5b（`tellurion-orchestration` QT-44，**W6 已落**）；结果读取走 core 的 **R1 持久读面**（B6-3 `8537ffd`，2026-10-25：`backtest_jobs.result_status` 是 `status` 的唯一权威，「跑完但无效」返 200 不再 404；队列态非 completed 的行仍 404，偏差见 §6.1）；基准走 X1b（已落）；holdings / 因子暴露走 interim artifact 面（R2 形状未冻结）。缺依赖即报错，不降级出假报告。
 
@@ -54,7 +54,7 @@ verified-by: R1 换面（§6.1 `status` 权威 = core `result_status` + 残留�
 | 情况 | 返回 | 说明 |
 |---|---|---|
 | 无凭证 / token 过期 | 401 `unauthenticated` | 不重试，补齐凭证。✅ 全部端点（2026-10-25） |
-| 角色不足（读 viewer / 写 trader） | 403 `forbidden` | 不重试。✅ 全部端点（2026-10-25） |
+| 角色不足（读 viewer / 写 trader / 服务间 service） | 403 `forbidden` | 不重试。✅ 全部端点（2026-10-25；`service` 档 2026-10-26） |
 | 鉴权闸未装配 | 503 `auth_unavailable` | 不重试；服务端装配问题。✅ |
 | 请求体 / 参数非法（含 `n<=0`、空网格、ID 数越界） | 400 `invalid_params` | 修正后重试 |
 | 归因方法不支持 | 400 `method_not_supported` | 只接受 `brinson` / `factor` |
@@ -103,9 +103,9 @@ verified-by: R1 换面（§6.1 `status` 权威 = core `result_status` + 残留�
 
 > 这不是对外 API，但它是**本仓读上游**的冻结形状——`409 / 404 / 503` 的归因全靠它，所以同样按契约管理。
 > 契约版本：`analysis.UpstreamContractVersion = "v1"`（`internal/analysis/upstream_contract.go`）；形状镜像在 `internal/analysis/model.go`。
-> **仍未迁 `tellurion-contracts`**：该仓 `analysis` 包未发布——实测（2026-10-25）远端最新 tag 是 `v0.6.0`，`v0.6.0` 与 `origin/main` 的业务包只有 `dataprotocol` / `domain` / `engine` / `fees`，**没有 `analysis/`**。迁移时端口方法集与校验语义不变，只换 DTO 的 owner。
+> **owner = 本仓（analytics），不迁 `tellurion-contracts`**：该仓至今**没有** `analysis` 包——实测（2026-10-26）远端最新 tag `v0.6.0` 与 `origin/main` 的业务包只有 `dataprotocol` / `domain` / `engine` / `fees`。迁移的**触发条件**与实测依据见 **§6.4**。
 > **版本策略**：加字段 = MINOR（`omitempty`，消费端忽略未知字段）；**改名 / 删字段 / 改语义 = breaking**，先改本节再改代码。
-> **钉死方式**：`TestUpstreamContractWireShape` 用 golden JSON 往返比对（字段名被改 / 被删即红）；`TestUpstreamContractArtifactFailClosed` 钉必填项。
+> **钉死方式**：`TestUpstreamContractWireShape` 用 golden JSON 往返比对（字段名被改 / 被删即红）；`TestUpstreamContractArtifactFailClosed` 钉必填项；`TestUpstreamContractOwnerStaysLocal` / `TestUpstreamContractMigrationTriggerDocumented` 钉 owner 与触发条件（§6.4）。
 
 ### 6.1 R1 结果面 — `BacktestResponse`
 
@@ -173,12 +173,54 @@ verified-by: R1 换面（§6.1 `status` 权威 = core `result_status` + 残留�
 
 新增标识必须先改本节（`writeError` 原样透出 `IncompleteError.Missing`，无兜底映射）。
 
-## 7. 鉴权现状登记（2026-10-25）
+### 6.4 DTO 的 owner 与「第二个使用方」的触发条件
+
+**owner = 本仓（analytics）**，不迁 `tellurion-contracts`。裁决原文见
+`tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` ③（跨仓决策的
+真相源在 core 仓；本仓只留指针与可执行判据）。
+
+**触发条件（唯一）**：**core 或 orchestration 出现 import analytics DTO 的 Go 代码**。
+
+- **HTTP 交互不算**：core / orchestration 只经 HTTP 调本服务（wire 形状一致即可）**不构成**
+  第二个使用方——那是**传输**依赖，不是 **Go 类型**依赖。
+- 触发时怎么迁：按 contracts ADR-0001 ① 把 DTO 迁到 `tellurion-contracts` 的 `analysis` 包；
+  **端口方法集与校验语义不变**（`validateResultContract` / `validatePortfolioSnapshot` /
+  `validateFactorExposures` 三者逐字保留，只换 DTO 的 owner）。
+- **不迁的代价**（接受）：DTO 留在 `internal/analysis/model.go`，本仓与第二个使用方之间只能靠
+  wire 契约对齐，不能靠编译器——所以 wire 形状由 §6.1 / §6.2 的 golden 用例钉死。
+
+**实测依据（2026-10-26，本仓可自证的部分）**：
+
+| 事实 | 实测 |
+|---|---|
+| core 对 `tellurion-analytics` 的 Go import | **0 处** |
+| core 内 `PortfolioSnapshot` 命中 | 26 处，**全是 core 自己的私有符号**（`pkg/alert/manager.go:76` 等） |
+| core 内 `FactorExposure` / `AnalysisReport` 命中 | **0 处** |
+| orchestration 与本仓的交互 | **只经 HTTP**（`internal/upstream/sensitivity.go` 走 `POST /api/runs/parents`） |
+| `tellurion-contracts` 的业务包清单 | `dataprotocol` / `domain` / `engine` / `fees`——**无 `analysis` 包** |
+
+⇒ **当前没有第二个使用方**，触发条件未命中。
+
+**钉死方式**（`internal/analysis/upstream_contract_test.go`）：
+
+- `TestUpstreamContractOwnerStaysLocal`：本仓源码**不得** import `tellurion-contracts` 的任何包
+  （owner 留在本仓 ⇒ 零跨仓类型依赖）。这条是本仓能自己证的**最强**判据：一旦有人把 DTO 挪进
+  contracts 并改用它的类型，本仓就会有 contracts import ⇒ 红。
+- `TestUpstreamContractMigrationTriggerDocumented`：本节（§6.4）必须在 `docs/api-schema.md` 里
+  存在且含触发条件的两个要素（`core` / `orchestration` 的 **import** 措辞 + **HTTP 交互不算**）。
+  防止「触发条件只活在某个人的脑子里」——裁决改了而文档没跟上 ⇒ 红。
+
+## 7. 鉴权现状登记（2026-10-26）
 
 > 本节记录**今天的事实**。目标口径见 `ARCHITECTURE.md` §9.7 R6；两者不得混读。
 
-- **代码登记**：`httpapi.AuthStatus = "enforced"`（`internal/httpapi/auth_status.go`）。改鉴权必须同时改这个常量，否则 `TestAuthEnforcedCurrentState` 直接红。
-- **事实**：`Server` 的每个端点都过 `requireAuth`（kit `auth/httpadapter`）：未装配 Authorizer → 503，无凭证 / 坏 token → 401，角色不足 → 403。策略表：6 个 POST = trader，2 个 GET = viewer（`internal/httpapi/policy.go`）。
+- **代码登记**：`httpapi.AuthStatus = "enforced"`（`internal/httpapi/auth_status.go`）。改鉴权必须同时改这个常量、重写 `TestAuthEnforcedCurrentState`，并同步 docs/api-schema.md §7
+  与 docs/TASKS.md——不要只改代码。
+- **事实**：`Server` 的每个端点都过 `requireAuth`（kit `auth/httpadapter`）：未装配 Authorizer → 503，无凭证 / 坏 token → 401，角色不足 → 403。策略表：6 个 POST = trader（+ admin + **service**），2 个 GET = viewer（+ trader + admin + **service**）（`internal/httpapi/policy.go`）。
 - **可执行锚点**：`TestAuthEnforcedCurrentState` —— 8 条路由无凭证一律 401、6 个 POST 的 viewer 一律 403、trader 可执行、viewer 可读；`TestRouteTableEqualsPolicyTable` 钉住路由表 ≡ 策略表。
-- **启动闸**：有 `JWT_SECRET` 启用鉴权；无 secret + 回环 = 开放（仅本地开发）；无 secret + 非回环 = **拒绝启动**。
-- **接线清单（已完成）**：① `AuthStatus` 常量与用例；② 本节与 §2 两行；③ `ARCHITECTURE.md` §9.7 R6；④ `docs/TASKS.md` QT-43 的「鉴权」条目。
+- **`service` 服务间角色（2026-10-26，裁-17 / ADR-0004）**：core 代机器调本仓时用 `service` 角色的长期 token。本仓 8 条端点**全部**开这一档——本仓没有审批 / 留痕 / 配置 / 交易端点，不存在「机器凭证代劳人的责任动作」这条风险面（详见 ADR-0004 的理由与代价）。
+  - **签发与分发不在本仓**：本仓只保证「**有 token 就能用**」——不造 token、不存 token、不分发 token。签发入口是 kit `v0.1.2` 的 `IssueServiceToken`；签发与注入属 core QT-71 与 `deploy/k8s/` 部署清单（**跨仓腿**）。
+  - **守卫**：`TestPolicy_ServiceRoleScope`（service 调 8 条端点都不被闸拦下 + viewer 打 POST 仍 403）、`TestPolicy_ServiceRoleCoexistsWithHumanRoles`（service 与真人角色并列写在同一条 `Roles`）、`TestPolicy_ServiceRoleDeclaredOnEveryRoute`（全表都开，新增端点漏表态即红）。
+  - ⚠️ **已知跨仓缺口（不在本仓）**：kit `auth/httpadapter.Authenticate` 要求 subject 可解析为 `int64`，而裁-17 的生产口径 `sub=service:<repo>` 是非数字 subject ⇒ 生产 token 目前会被 kit 判 401，压根到不了本仓的角色判定。本仓的守卫用例证明的是**本仓策略表**正确，**不**证明生产 token 能走通；该缺口归 kit（放宽 subject 校验）或改裁-17 的 subject 口径，**已报协调者**（与 risk 的同型缺口同一处）。
+- **启动闸**：有 `JWT_SECRET` 启用鉴权；无 secret + 回环 = 开放；无 secret + 非回环 = **拒绝启动**。
+- **接线清单（已完成）**：① `AuthStatus` 常量与用例；② 本节与 §2 两行；③ `ARCHITECTURE.md` §9.7 R6；④ `docs/TASKS.md` QT-43 的「鉴权」条目；⑤ `service` 档（策略表 + 三条守卫用例 + ADR-0004 + 本节登记）。

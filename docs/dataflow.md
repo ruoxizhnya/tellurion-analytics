@@ -26,9 +26,10 @@ verified-by: R1 换面（读取边 `ResultReader` = core 持久读面；队列�
 
 ## 2. 关键时序
 
-0. **鉴权闸**（2026-10-25）：每个请求先过 `requireAuth`——未装配 Authorizer → 503 `auth_unavailable`，
-   无凭证 / 坏 token → 401，角色不足 → 403；6 个 POST 需 `trader` 及以上，2 个 GET 需 `viewer` 及以上。
-   通过后才进入下面的计算 / 读取链路。
+0. **鉴权闸**（2026-10-25 接线，2026-10-26 加 `service` 档）：每个请求先过 `requireAuth`——未装配 Authorizer → 503 `auth_unavailable`，
+   无凭证 / 坏 token → 401，角色不足 → 403；6 个 POST 需 `trader` 及以上（+ admin + **service**），2 个 GET 需 `viewer` 及以上（+ trader + admin + **service**）。
+   `service` 是**服务间**角色（core 代机器调本仓用，ADR-0004）：本仓 8 条端点全是分析计算 / 报告读取，没有审批 / 留痕 / 配置 / 交易面，
+   故全表开放；签发与分发不在本仓。通过后才进入下面的计算 / 读取链路。
 1. `POST /api/analysis/metrics {run_id}` → 拉结果 DTO → 分区（`from_result` 原样 / `computed` 补算）→ 落 `analysis.reports`
 2. `POST /api/analysis/benchmark {run_id, benchmark_code, window?}` → 查 `analysis.benchmarks` 最新登记 → 取基准序列（data）→ 对齐 → 超额 / TE / IR / beta / 滚动 → 落报告
 3. `POST /api/analysis/attribution {run_id, method}` → brinson 读 holdings artifact / factor 读因子暴露 → 分项 + residual → 落 `analysis.reports` + `analysis.attribution`

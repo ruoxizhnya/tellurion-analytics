@@ -232,27 +232,99 @@ func TestResultReader_PersistentK9ReadPlane(t *testing.T) {
 	}
 }
 
-// TestUpstream_SendsServiceToken（裁-15）：core / data 上了鉴权闸后，三个
-// reader 都必须带 Bearer；空 token 不发头（回环免密形态）。
+// TestUpstream_SendsServiceToken（裁-15）：core / data 上了鉴权闸后，**每个**带
+// Bearer 的 reader 都必须把凭证送出去；空 token 不发头（回环免密形态）。
+//
+// 覆盖三个 reader（结果 / 基准 / artifact）——它们的出站 URL 不同，但「带 token
+// 就得发 Authorization」是同一条契约：漏掉任何一个，上游开了鉴权后本仓就会恒 401。
 func TestUpstream_SendsServiceToken(t *testing.T) {
 	var got []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = append(got, r.Header.Get("Authorization"))
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(resultJSON("completed", nil))
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/api/backtest/"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(resultJSON("completed", nil))
+		case strings.HasSuffix(r.URL.Path, "/portfolio-snapshot"):
+			_ = json.NewEncoder(w).Encode(analysis.PortfolioSnapshot{
+				Holdings:               []analysis.Holding{{Symbol: "A", Sector: "tech", Weight: 1, PeriodReturn: 0.1}},
+				BenchmarkSectorWeights: map[string]float64{"tech": 1},
+				BenchmarkSectorReturns: map[string]float64{"tech": 0.08},
+				DatasetHash:            "h1",
+			})
+		case strings.HasSuffix(r.URL.Path, "/factor-exposures"):
+			_ = json.NewEncoder(w).Encode(analysis.FactorExposures{
+				Factors:     []analysis.FactorExposure{{Name: "value", Exposure: 1, FactorReturn: 0.05}},
+				DatasetHash: "f1",
+			})
+		default:
+			// /datasets/resolve 与 /datasets/{hash}
+			if strings.HasSuffix(r.URL.Path, "/resolve") {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"dataset_hash": "h1",
+					"metadata":     map[string]any{"adjustment_basis": "qfq"},
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"hash":     "h1",
+				"metadata": map[string]any{"adjustment_basis": "qfq"},
+				"bars": map[string][]map[string]any{
+					"600000": {{"symbol": "600000", "time": testStart, "close": 10}},
+				},
+			})
+		}
 	}))
 	defer srv.Close()
 
-	reader := NewResultReaderWithToken(srv.URL, srv.Client(), " svc-token ")
+	const token = " svc-token "
+	wantAuth := "Bearer svc-token"
+
+	// 结果面（core）。
+	reader := NewResultReaderWithToken(srv.URL, srv.Client(), token)
 	if _, err := reader.GetResult(context.Background(), "run-1"); err != nil {
 		t.Fatalf("GetResult: %v", err)
 	}
-	if len(got) != 1 || got[0] != "Bearer svc-token" {
-		t.Fatalf("want Bearer svc-token, got %v", got)
+	if len(got) != 1 || got[0] != wantAuth {
+		t.Fatalf("result reader: want %q, got %v", wantAuth, got)
 	}
 
-	plain := NewResultReader(srv.URL, srv.Client())
+	// 基准面（data）：resolve + snapshot 两次请求都要带。
 	got = nil
+	bench := NewBenchmarkReaderWithToken(srv.URL, srv.Client(), token)
+	if _, err := bench.GetSeries(context.Background(), "600000", "qfq", testStart, testStart); err != nil {
+		t.Fatalf("GetSeries: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("benchmark reader: want 2 requests, got %d", len(got))
+	}
+	for i, h := range got {
+		if h != wantAuth {
+			t.Errorf("benchmark reader request %d: want %q, got %q", i, wantAuth, h)
+		}
+	}
+
+	// artifact 面：holdings / 因子暴露两次请求都要带。
+	got = nil
+	artifacts := NewArtifactReaderWithToken(srv.URL, srv.Client(), token)
+	if _, err := artifacts.GetPortfolioSnapshot(context.Background(), "run-1"); err != nil {
+		t.Fatalf("GetPortfolioSnapshot: %v", err)
+	}
+	if _, err := artifacts.GetFactorExposures(context.Background(), "run-1"); err != nil {
+		t.Fatalf("GetFactorExposures: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("artifact reader: want 2 requests, got %d", len(got))
+	}
+	for i, h := range got {
+		if h != wantAuth {
+			t.Errorf("artifact reader request %d: want %q, got %q", i, wantAuth, h)
+		}
+	}
+
+	// 空 token ⇒ 不发 Authorization（回环 + 无 secret 的开发态）。
+	got = nil
+	plain := NewResultReader(srv.URL, srv.Client())
 	if _, err := plain.GetResult(context.Background(), "run-1"); err != nil {
 		t.Fatalf("GetResult: %v", err)
 	}

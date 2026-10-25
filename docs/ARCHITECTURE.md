@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-25
-verified-by: R1 换面（core B6-3 `8537ffd` 持久读面 + §9.7 R1 两条残留偏差）
+last-verified: 2026-10-26
+verified-by: H6（R2 owner 落本仓（§9.7 R2 + §5 依赖方向）；`service` 服务间角色入策略表，ADR-0004）
 ---
 
 # 架构 — tellurion-analytics
@@ -44,17 +44,22 @@ verified-by: R1 换面（core B6-3 `8537ffd` 持久读面 + §9.7 R1 两条残�
 ## 5. 依赖方向
 
 ```
-contracts（结果 DTO）+ kit（logging/http/db/statistics）
+kit（鉴权机制）+ pgx（PG 驱动）
         ↑
 tellurion-analytics ──(只读)──► core / run（结果）
         └──(只读)──► tellurion-data（基准、因子值）
 ```
 
-**今日实况（2026-10-25）**：`go.mod` 的直接依赖两条——`github.com/jackc/pgx/v5 v5.11.0`（PG Store 与迁移执行）与 `github.com/ruoxizhnya/tellurion-kit v0.1.1`（鉴权机制，2026-10-25 W3）；**内部仓只有 kit 这一条**。契约仓的 `analysis` 包尚未发布（实测远端最新 `v0.6.0` 里没有它），本仓仍以 `internal/analysis/model.go` 的本地 DTO 镜像冻结消费形状（§9.8）。这是**临时**的：镜像只在消费端出现，不向其他仓输出；契约发布后按 §9.8 迁走。
+**今日实况（2026-10-26）**：`go.mod` 的直接依赖两条——`github.com/jackc/pgx/v5 v5.11.0`（PG Store 与迁移执行）与 `github.com/ruoxizhnya/tellurion-kit v0.1.1`（鉴权机制，2026-10-25 W3）；**内部仓只有 kit 这一条**。**本仓不依赖 `tellurion-contracts`**：R1 / R2 的 DTO owner 已裁 = **本仓**（裁决 ③，2026-10-25 主任口径），本地形状冻结在 `internal/analysis/model.go`（§9.8），触发迁移的条件写死为「core 或 orchestration 出现 import analytics DTO 的 Go 代码」（HTTP 交互不算）——成文见 `api-schema.md` §6.4。
+
+⇒ 依赖方向图里**没有 contracts 那一层**：DTO 只在本仓出现，不向其他仓输出；将来真迁（触发条件命中）时按 contracts ADR-0001 ① 迁，端口方法集与校验语义不变。守卫 `TestUpstreamContractOwnerStaysLocal` 钉住「本仓源码零 contracts import」。
 
 ## 6. 关键决策
 
 - [`adr/0001-纯函数只读.md`](adr/0001-纯函数只读.md)
+- [`adr/0002-报告不可变由PG触发器兜底.md`](adr/0002-报告不可变由PG触发器兜底.md)
+- [`adr/0003-鉴权接入-kit适配与本仓策略表.md`](adr/0003-鉴权接入-kit适配与本仓策略表.md)
+- [`adr/0004-service角色在本仓全表开放.md`](adr/0004-service角色在本仓全表开放.md)
 
 ## 7. 非目标（明确不做）
 
@@ -123,7 +128,8 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 ### 9.4 C 组 · 服务对外 HTTP 面（升格后）
 
-> **鉴权（2026-10-25 已接线，ADR-0003）**：机制在 kit `v0.1.1` 的 `auth/httpadapter`（`Parse` + `kind==access` + 角色 any-of + 启动闸），策略表在本仓 `internal/httpapi/policy.go`。**全部端点** fail-closed：未装配 Authorizer → `503 auth_unavailable`，无 token / 过期 / refresh 当 access → `401 unauthenticated`，角色不足 → `403 forbidden`。6 个 POST = trader、2 个 GET = viewer；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。
+> **鉴权（2026-10-25 已接线，ADR-0003；2026-10-26 加 `service` 档，ADR-0004）**：机制在 kit `v0.1.1` 的 `auth/httpadapter`（`Parse` + `kind==access` + 角色 any-of + 启动闸），策略表在本仓 `internal/httpapi/policy.go`。**全部端点** fail-closed：未装配 Authorizer → `503 auth_unavailable`，无 token / 过期 / refresh 当 access → `401 unauthenticated`，角色不足 → `403 forbidden`。6 个 POST = trader（+ admin + **service**），2 个 GET = viewer（+ trader + admin + **service**）；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。
+> `service` 是**服务间**角色（core 代机器调本仓用）：本仓 8 条端点全是分析计算 / 报告读取，**没有**审批 / 留痕 / 配置 / 交易端点，故全表开放（ADR-0004）。签发与分发**不在本仓**——本仓只保证「有 token 就能用」。
 > **wire 契约落点**：core `docs/openapi.yaml`（QT-50 ③-③）。今天它没有下表端点；下表在升格前是目标草案，**不复制进 openapi**。
 > **错误码**：与 `docs/api-schema.md` §2 双向一一对应。
 
@@ -163,11 +169,11 @@ tellurion-analytics ──(只读)──► core / run（结果）
 | # | 事项 | 当前状态 | 建议 / 影响 |
 |---|---|---|---|
 | R1 | **K9-correct 的结果读取面**（F1） | ✅ **已落（core B6-3 `8537ffd`，2026-10-25）**：`backtest_jobs.result_status` 持久化 K9 结论，`GET /api/backtest/{id}/report` 以该列为 `status` 的唯一权威（列 → 结果体 → completed），`completed/invalid` 行返 200 不再 404。本仓 `internal/upstream.ResultReader` 换到这一面：**URL 与 DTO 都没变**（正是本节原先写的「只换面，端口不变」），缺 `status` 的分支保留但语义改成「上游没升到 B6-3」。**残留偏差**（`api-schema.md` §6.1）：端点仍按**队列态**放行 ⇒ pending / running 与引擎故障行（`failed`/`failed`）读成 `404 run_not_found`，K9 的 `failed` 经持久面到不了 409；Migration 059 把迁移前的完成行回填成 `completed`，旧 invalid 读不回 | 消费端已由 `TestResultReader_PersistentK9ReadPlane` 按 core 的 overlay 建模钉住。要把两条偏差变成正确语义，得先裁「读面按队列态还是结论态放行」——属 core 侧改动，不在本仓猜 |
-| R2 | **holdings / 因子暴露 artifact**（F2） | 结果 DTO 无逐标的持仓；`BacktestState` 只在内存。**本仓已按临时形状接 interim artifact 适配器**：`PortfolioSnapshot{holdings, benchmark_sector_weights, benchmark_sector_returns}`、`FactorExposures{factors[], dataset_hash}`（`internal/analysis/model.go`），HTTP 面 `GET /runs/{id}/portfolio-snapshot` / `/factor-exposures`；未配置即 503。消费端形状已冻结为 **`UpstreamContractVersion=v1`**（`api-schema.md` §6.2：`dataset_hash` 与行业权重 / 收益必填） | 定 artifact 形状与 owner（core 产、本仓读）后，把这两个临时 DTO 迁到 `tellurion-contracts` 的 analysis 包；**端口方法集不变**，形状变更走契约流程 |
+| R2 | **holdings / 因子暴露 artifact**（F2） | 结果 DTO 无逐标的持仓；`BacktestState` 只在内存。**本仓已按临时形状接 interim artifact 适配器**：`PortfolioSnapshot{holdings, benchmark_sector_weights, benchmark_sector_returns}`、`FactorExposures{factors[], dataset_hash}`（`internal/analysis/model.go`），HTTP 面 `GET /runs/{id}/portfolio-snapshot` / `/factor-exposures`；未配置即 503。消费端形状已冻结为 **`UpstreamContractVersion=v1`**（`api-schema.md` §6.2：`dataset_hash` 与行业权重 / 收益必填） | **owner 已裁 = 本仓（analytics），不迁 contracts**（2026-10-25 主任口径，裁决 ③）：DTO 留在 `internal/analysis/model.go`，触发迁移的条件写死为「core 或 orchestration 出现 import analytics DTO 的 Go 代码」（HTTP 交互不算）——成文见 `api-schema.md` §6.4，守卫 `TestUpstreamContractOwnerStaysLocal` / `TestUpstreamContractMigrationTriggerDocumented`。真迁移时**端口方法集与校验语义不变**，只换 DTO 的 owner |
 | R3 | **sensitivity 的 job 队列**（F3） | **已落（2026-10-25，W8）**：orchestration 的 X5b 父端点（W6）已接；本仓 `SensitivityQueue` = `Submit` + `Status`，`analysis.sensitivity_runs.points` 按父汇总逐点回填；未配置 `-orchestration-url` 仍 503 | 执行侧装配不在本仓（仍正确）：`base_run_spec` 只带 `run_id` 锚点，**core worker 的 `AnchorResolver` 负责从 core 的 `backtest_jobs` 恢复完整请求**；锚点形状不变，无需契约变更 |
 | R4 | **基准数据面与口径**（F4） | **X1b 已落**（`tellurion-data` `/datasets/resolve` + `/datasets/{hash}`）；本仓 `BenchmarkReader` 已接 X1b，按登记的 `adjustment_basis` 取数，basis 不一致即 409 | 保持 `adjustment_basis` 在登记身份里；若将来改走别的数据面，只换适配器 |
 | R5 | **PDF 导出** | **已裁（2026-10-24）= 非目标**：core 现状只有 html（用浏览器打印），无渲染器 | 从目标面移除；只承诺 html / csv（`api-schema.md` §1 / §4）。不引入渲染器、不立 ADR |
-| R6 | **鉴权角色矩阵** | **已裁（2026-10-25）**：6 个 POST = trader、2 个 GET = viewer；机制在 kit `auth/httpadapter`，策略表在本仓 `internal/httpapi/policy.go`（ADR-0003） | 全端点 fail-closed；无 secret + 非回环拒绝启动 |
+| R6 | **鉴权角色矩阵** | **已裁（2026-10-25）**：6 个 POST = trader、2 个 GET = viewer；机制在 kit `auth/httpadapter`，策略表在本仓 `internal/httpapi/policy.go`（ADR-0003）。**2026-10-26 加 `service` 档**（ADR-0004）：本仓 8 条端点全开 `service`（本仓没有审批 / 留痕 / 配置 / 交易端点，不存在「机器凭证代劳人的责任动作」）；签发与分发不在本仓 | 全端点 fail-closed；无 secret + 非回环拒绝启动；`service` 与真人角色**并列**写在同一条 `Roles`（kit 角色判定 any-of 不排序） |
 
 ### 9.8 实现现状（2026-10-24，QT-43 施工 ②）
 
@@ -207,12 +213,12 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 **故意取舍（不是遗漏）**
 
-1. **内部仓依赖只有 kit 一条**：`go.mod` 的直接依赖是 `pgx v5.11.0`（第三方驱动）+ `tellurion-kit v0.1.1`（鉴权机制，W3）；contracts 未引入——它的 `analysis` 包尚未发布（实测远端最新 `v0.6.0`），仍以本地 DTO 镜像冻结形状；镜像**只在消费端使用**，不违反「只认版本号」。
+1. **内部仓依赖只有 kit 一条**：`go.mod` 的直接依赖是 `pgx v5.11.0`（第三方驱动）+ `tellurion-kit v0.1.1`（鉴权机制，W3）；**contracts 零依赖**——R1 / R2 的 DTO owner 已裁 = **本仓**（裁决 ③，2026-10-25），本地镜像**不是「等契约发布就迁走」的临时态**：触发迁移的条件写死为「core 或 orchestration 出现 import analytics DTO 的 Go 代码」（HTTP 交互不算），成文在 `api-schema.md` §6.4，守卫 `TestUpstreamContractOwnerStaysLocal`（本仓源码零 contracts import）钉住。
 2. **PG 是生产 Store，Memory 只做测试 / 无库本地装配**：启动时给了 DSN 就连接 + 迁移；空 DSN 会打 WARNING。`completed` 不可变由应用层 + DB 触发器双保险（ADR-0002）。
 3. **R1 已落 ⇒ `ResultReader` 读的是持久读面**（2026-10-25，core B6-3 `8537ffd`）：`status` 的唯一权威是 `backtest_jobs.result_status`，缺 `status` 只剩「上游没升到 R1」一种含义，照旧 fail-closed、**不解析错误串**；URL / DTO / 端口方法集都没动（§9.7 R1 原先的预期成立）。残留两条偏差如实登记：读面按**队列态**放行（pending / running / 引擎故障行 ⇒ 404），Migration 059 把迁移前的完成行回填成 `completed`。
-4. **R2 未裁 ⇒ artifact 形状是临时的**：`GET /runs/{id}/portfolio-snapshot` / `/factor-exposures` 是 interim wire 形状；owner 与最终形状定了再迁 contracts，端口不变。
+4. **R2 的 DTO owner 已裁 = 本仓（2026-10-25，裁决 ③）**：`GET /runs/{id}/portfolio-snapshot` / `/factor-exposures` 是 **interim wire 形状**（上游 artifact 面尚未由 core 定稿），但**消费端 DTO 的 owner 不再是「待定」**——留在本仓，触发迁移的条件见 `api-schema.md` §6.4。端口方法集与校验语义在真迁移时不变。
 5. **sensitivity 的 points 由父汇总驱动（2026-10-25）**：`base_run_spec` 只带 `run_id` 锚点，网格交给 X5b；`points` 只能从 NULL 一次写满，缺 point 就整份失败（不补、不猜）。执行侧 worker 在 core（`cmd/worker`）：它按锚点恢复完整 RunSpec、用 core 引擎执行、把 K9 结论上报编排侧；本仓仍不执行回测。
-6. **鉴权已接线（2026-10-25）**：kit `auth/httpadapter` + 本仓策略表，全端点 401/403/503 fail-closed（ADR-0003）。
+6. **鉴权已接线（2026-10-25）**：kit `auth/httpadapter` + 本仓策略表，全端点 401/403/503 fail-closed（ADR-0003）；**2026-10-26 加 `service` 服务间角色**（ADR-0004，本仓 8 条端点全开；签发与分发不在本仓）。
 7. **`Migrations()` 只返回副本**，没有「按版本号执行 / 回滚」——与 core / risk 同一取向（`docs/db-schema.md` §4）。
 
 **自检（2026-10-25，W8）**：`gofmt -l .` 无输出；`go build ./...`、`go vet ./...`、`go test ./... -count=1` 全绿。带真库 + 真进程：PG 16.15（WSL）上 `ANALYTICS_TEST_DSN` / `ORCHESTRATION_TEST_DSN` 同时设置，`TestSensitivityEndToEndWithOrchestrationProcess` / `TestEndToEndWithPostgres` / `TestPGSensitivityBackfill` 全 `PASS`。测试覆盖：三值 fail-closed、`seed` 规则（nil / 0 / 上界）、同 seed 字节一致、`report_id` 各键敏感性、`completed` 不可变（含触发器直连）、Brinson / 因子恒等式（`1e-8`）、相关性 30 点边界与对角 1.0、导出确定性、13 个 wire code 与 503、PG 迁移幂等与真库 E2E、sensitivity 网格顺序 / 缺 point fail-closed / points 一次写满。

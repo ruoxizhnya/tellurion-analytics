@@ -6,7 +6,7 @@
 
 分析服务：基准 / 归因 / 敏感性 / 蒙特卡洛。**纯函数、只读上游**——不持有跨请求状态、不写任何上游表；但**拥有自己的结果表** `analysis.*`（reports / benchmarks / sensitivity_runs / mc_runs / attribution，见 `docs/db-schema.md`）。
 
-**状态**：已启动（2026-10-23，QT-43 施工 ①）——X4a~X4d 的代码与测试已落盘，`go build/vet/test` 全绿；**PG Store 与上游读取端口已于 2026-10-24（施工 ②）接线**，**sensitivity 逐点回填于 2026-10-25（W8）接通 X5b 父作业**（执行侧 worker 同在 2026-10-25 落 core `tellurion:cmd/worker`，真进程 E2E 已改走 worker HTTP 协议，不再 SQL 模拟），**结果读取于 2026-10-25 换到 core 的 R1 持久读面**（B6-3 `8537ffd`：`backtest_jobs.result_status` 是 `status` 的唯一权威）；鉴权与出站服务间凭证同日接线；未配置的上游端口仍 fail-closed 成 `503 dependency_unavailable`。现状详见 `docs/ARCHITECTURE.md` §9.8，未落项见 `docs/TASKS.md` QT-43 施工记录（R2 契约迁移 / token 分发 / R1 的两条 core 侧残留偏差）。
+**状态**：已启动（2026-10-23，QT-43 施工 ①）——X4a~X4d 的代码与测试已落盘，`go build/vet/test` 全绿；**PG Store 与上游读取端口已于 2026-10-24（施工 ②）接线**，**sensitivity 逐点回填于 2026-10-25（W8）接通 X5b 父作业**（执行侧 worker 同在 2026-10-25 落 core `tellurion:cmd/worker`，真进程 E2E 已改走 worker HTTP 协议，不再 SQL 模拟），**结果读取于 2026-10-25 换到 core 的 R1 持久读面**（B6-3 `8537ffd`：`backtest_jobs.result_status` 是 `status` 的唯一权威）；鉴权与出站服务间凭证同日接线；**R2 的 DTO owner 于 2026-10-26 落定为本仓**（裁决 ③：触发条件 = core / orchestration 出现 import analytics DTO 的 Go 代码，HTTP 交互不算），**`service` 服务间角色于 2026-10-26 入策略表**（ADR-0004，本仓 8 条端点全开；签发与分发不在本仓）；未配置的上游端口仍 fail-closed 成 `503 dependency_unavailable`。现状详见 `docs/ARCHITECTURE.md` §9.8，未落项见 `docs/TASKS.md` QT-43 施工记录（token 分发的跨仓腿 / R1 的两条 core 侧残留偏差）。
 
 **今天的实现**：本仓自有 `internal/analysis`（纯函数 + 端口 + Memory Store + DDL）、`internal/httpapi`（8 端点，全部过鉴权闸；`auth.go` 是 kit 适配，`policy.go` 是策略表）、`cmd/analyticsservice`。上游计算口径的参考实现仍在 core（`core:pkg/backtest/metrics`、`core:pkg/backtest/reporting`），本仓**只对照公式、不 import**。
 
@@ -51,12 +51,12 @@ go test ./...
 
 | 依赖 | 版本 | 说明 |
 |---|---|---|
-| `github.com/ruoxizhnya/tellurion-contracts` | 未引入（远端最新 `v0.6.0`，2026-10-24 发版；实测 `v0.6.0` 与 `origin/main` 均无 `analysis` 包，2026-10-25） | 契约仓的 `analysis` 包未发布；本仓暂以 `internal/analysis/model.go` 的本地 DTO 镜像冻结形状（只消费、不输出） |
+| `github.com/ruoxizhnya/tellurion-contracts` | **未引入**（实测 2026-10-26：远端最新 `v0.6.0` 与 `origin/main` 的业务包只有 `dataprotocol` / `domain` / `engine` / `fees`，**无 `analysis` 包**） | R1 / R2 的 DTO **owner = 本仓**（裁决 ③，2026-10-25）：DTO 留在 `internal/analysis/model.go`，**不迁 contracts**。触发迁移的条件写死为「core 或 orchestration 出现 import analytics DTO 的 Go 代码」（HTTP 交互不算）——成文见 `docs/api-schema.md` §6.4，守卫 `TestUpstreamContractOwnerStaysLocal` |
 | `github.com/ruoxizhnya/tellurion-kit` | `v0.1.1` | 鉴权机制：`auth`（token 解析）+ `auth/httpadapter`（net/http 适配、启动闸、Policy）。本仓只写策略表，不另造 token 校验 |
 | `github.com/jackc/pgx/v5` | `v5.11.0` | `analysis.*` 的 PG 连接池与迁移执行（`internal/analysis/pgstore.go`）；选 pgx 而非 `database/sql` 驱动是为了直接拿 `pgxpool` 与 `pgtype` 的 NULL 语义 |
 
-> `go.mod` 现在有两条直接依赖：`pgx v5.11.0`（2026-10-24，施工 ②）与 `tellurion-kit v0.1.1`（2026-10-25，W3 鉴权接线）。契约发布后按 `docs/ARCHITECTURE.md` §9.8 迁走本地镜像。
-
+> `go.mod` 现在有两条直接依赖：`pgx v5.11.0`（2026-10-24，施工 ②）与 `tellurion-kit v0.1.1`（2026-10-25，W3 鉴权接线）。**contracts 零依赖，且不打算引入**——DTO owner 已裁 = 本仓（裁决 ③）；真要迁的那天，触发条件见 `docs/api-schema.md` §6.4。
+>
 > 跨仓依赖**只认版本号**（伪版本或 tag），不认源码路径。契约变更走 `tellurion-contracts` 的发布，不走"顺手改一下"。
 
 ## 5. 活在哪、文档在哪

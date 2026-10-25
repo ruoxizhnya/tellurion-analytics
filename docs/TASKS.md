@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-25
-verified-by: R1 换面（ResultReader 接 core B6-3 持久读面 + 对表用例 + 两条 core 侧残留偏差登记）
+last-verified: 2026-10-26
+verified-by: H6（R2 owner 落本仓 + 触发条件成文于 api-schema §6.4；service 服务间角色入策略表，ADR-0004）
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -116,7 +116,11 @@ verified-by: R1 换面（ResultReader 接 core B6-3 持久读面 + 对表用例 
 **未落（如实登记，不算完成；本单仍 🔶）**
 
 1. **R1 的 K9-correct 持久读面**：核心在 core 侧（`ARCHITECTURE.md` §9.7 R1），本仓仍是 interim 适配器（读 core 现有 report 端点）。本次只是把**消费端形状与失败语义**冻结成 v1，不等于 R1 落地。（R1 已于 2026-10-25 结清，见下方「R1 换面」记录）
-2. **R2 artifact 的 owner 与最终形状**：本次冻结的是「本仓读它」的契约版本，owner 未定、**未迁 `tellurion-contracts`**（该仓 `analysis` 包未发布）。迁移时端口方法集与校验语义不变。
+2. **R2 artifact 的 owner 与最终形状**：本次冻结的是「本仓读它」的契约版本。
+   > **✅ owner 已裁（2026-10-25，主任口径）**：**owner = 本仓（analytics），不迁 contracts**；DTO 继续留在 `internal/analysis/model.go`，触发迁移的条件写死为「**core 或 orchestration 出现 import analytics DTO 的 Go 代码**」（HTTP 交互不算）。裁决全文见 `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` ③。
+   > **依据（实测）**：contracts `docs/adr/0001-契约只增不破且零实现.md` 决策 ① 原文「**本仓只放被 ≥2 个仓使用的类型 / 接口 / 错误 / 常量**」；实测 core 对 `tellurion-analytics` 的 import = **0 处**（core 内 26 处 `PortfolioSnapshot` / `FactorExposure` 命中**全是 core 自己的私有符号**，core 内 `AnalysisReport` 零命中）；orchestration 与本仓的交互**只经 HTTP**（`internal/upstream/sensitivity.go` 走 `POST /api/runs/parents`）⇒ **没有第二个使用方**；contracts 仓当前包清单实测只有 `dataprotocol` / `domain` / `engine` / `fees`，**无 `analysis` 包**。
+   > **口径不变**：`internal/analysis/upstream_contract.go` 的 `UpstreamContractVersion = "v1"` 与三个校验器（`validateResultContract` / `validatePortfolioSnapshot` / `validateFactorExposures`）语义**不动**；将来真迁时**端口方法集与校验语义不变**。
+   > **✅ 已成文 + 有守卫（2026-10-26 H6）**：触发条件写进 `api-schema.md` **§6.4**；守卫 `TestUpstreamContractOwnerStaysLocal`（本仓零 contracts import）+ `TestUpstreamContractMigrationTriggerDocumented`（§6.4 在位且含两个要素）。
 3. **sensitivity 逐点回填**：`SensitivityQueue` 仍只提交，`analysis.sensitivity_runs.points` 与完成态推进依赖 QT-44（等父端点/W6）。（2026-10-25 W8 已结清）
 4. **鉴权**：本次只做**现状登记**（常量 + 可执行锚点 + 文档），**未接线任何鉴权中间件**，不产出 401 / 403；安全边界仍是回环监听。
 5. **PDF**：非目标，不做。
@@ -189,10 +193,10 @@ verified-by: R1 换面（ResultReader 接 core B6-3 持久读面 + 对表用例 
 
 **未落（如实）**
 
-1. **执行侧（worker）仍未落地**：父汇总由执行侧调用 `parents.ApplyBatchSummary` 产生；本仓只读。W8 的真进程 E2E 用 SQL 模拟该写回，**不代表 worker 已存在**。
+1. ~~**执行侧（worker）仍未落地**~~ → **✅ 2026-10-25（H5）**：core 侧 worker 装配已落（`tellurion:cmd/worker` + `tellurion:internal/orchestrationworker`），子 run 上报终态即由编排服务调 `parents.SyncSummary` 真实写回父汇总（`ApplyBatchSummary` 的同源实现）。本仓的真进程 E2E 已改为走 **worker HTTP 协议**（注册 → 领取 → 上报），**不再用 SQL 模拟**；本仓仍然只读、不执行回测。
 2. **`base_run_spec` 只有 `run_id`**：完整 RunSpec 的装配属执行侧（R3 未裁），当前锚点只保证计划身份可算、网格可展开。
 3. **失败报告的逐点 error 只在 `error` 文本 + `analysis.sensitivity_runs.points`**：报告体仍遵守「completed 才有 body」的 DDL 约束，API 不单独暴露 failed 报告的 points。
-4. ~~R1 持久读面~~（**2026-10-25 R1 换面已结清**，见下方记录）、R2 owner / contracts 迁移、token 分发仍按上一条记录未落。
+4. ~~R1 持久读面~~（**2026-10-25 R1 换面已结清**，见下方记录）、~~R2 owner / contracts 迁移~~（**2026-10-26 H6 已结清**：owner 裁 = 本仓，触发条件成文于 `api-schema.md` §6.4）、token 分发仍按上一条记录未落（**本仓腿已落，跨仓腿未落**，见 H6 记录）。
 
 #### 施工记录（2026-10-25，H5：真进程 E2E 改走 worker HTTP 协议，去掉 SQL 模拟）
 
@@ -254,6 +258,64 @@ go test ./... -count=1          → TEST_EXIT=0
 4. token 分发（跨仓）仍不在本仓。
 
 **验收现状**：QT-43 的 ⑤ 三条判据维持**真库 E2E** 层成立（W8 记录）；本单保持 🔶，未落项收窄为「R2 owner / contracts 迁移、token 分发、R1 的两条 core 侧残留偏差、真 core 进程的 invalid 行端到端」。
+
+#### 施工记录（2026-10-26，H6：R2 契约化落在本仓 + token 分发的本仓腿）
+
+> **依据（先证伪再动手）**：派发原文的 R2 腿要求「按裁决 ③ 留在本仓，不迁 contracts」，且**三个校验器语义不动**。实测确认现状与裁决一致：① `internal/analysis/upstream_contract.go` 的 `UpstreamContractVersion = "v1"` 与三个校验器（`validateResultContract` / `validatePortfolioSnapshot` / `validateFactorExposures`）已在本仓落地；② core 对 `tellurion-analytics` 的 Go import 实测 **0 处**（core 内 `PortfolioSnapshot` 26 处命中全是 core 自己的私有符号 `pkg/alert/manager.go:76` 等，`FactorExposure` / `AnalysisReport` 零命中）；③ orchestration 与本仓**只经 HTTP** 交互（`internal/upstream/sensitivity.go` 走 `POST /api/runs/parents`）；④ contracts 仓当前包清单实测只有 `dataprotocol` / `domain` / `engine` / `fees`，**无 `analysis` 包**（远端最新 tag `v0.6.0` 与 `origin/main` 同）⇒ **没有第二个 Go 使用方**，触发条件未命中。
+
+**已落**
+
+1. **R2 契约化：owner 成文（§6.4）**：`docs/api-schema.md` 新增 **§6.4「DTO 的 owner 与「第二个使用方」的触发条件」**——owner = 本仓、不迁 contracts；触发条件写死为「**core 或 orchestration 出现 import analytics DTO 的 Go 代码**」，**HTTP 交互不算**；真触发时按 contracts ADR-0001 ① 迁，**端口方法集与校验语义不变**。同时订正 §6 抬头那句已过期的「仍未迁 contracts（该仓 analysis 包未发布）」——它把「owner 未定」写成了「等发布」，与裁决 ③ 的「不迁」口径不同（§6.4 承接）。
+2. **R2 两条可执行判据**（`internal/analysis/upstream_contract_test.go`）：
+   - `TestUpstreamContractOwnerStaysLocal`：go/ast 扫**全仓** .go 文件的 import，本仓**不得** import `tellurion-contracts` 的任何包（owner 留在本仓 ⇒ 零跨仓类型依赖）。判据从源码推导而非手写清单——手写清单会在有人新增一条 import 时过期，而那时守卫还是绿的。
+   - `TestUpstreamContractMigrationTriggerDocumented`：读 `docs/api-schema.md` 正文，§6.4 必须在位且含两个要素（core / orchestration 的 **import** 措辞 + **HTTP 交互不算**）。防「触发条件只活在某个人脑子里」。
+   - **三个校验器的语义与 `UpstreamContractVersion` 一字未动**（派发明令），既有用例 `TestUpstreamContractWireShape` / `TestUpstreamContractArtifactFailClosed` / `TestServiceAttributionRequiresArtifactDatasetHash` 全绿。
+3. **`service` 服务间角色入策略表**（裁-17 / 新 ADR-0004）：`internal/httpapi/policy.go` 的 8 条端点全部并列加 `service`（6 个 POST = trader + admin + service；2 个 GET = viewer + trader + admin + service）。**本仓 8 条端点全是分析计算 / 报告读取，没有审批 / 留痕 / 配置 / 交易端点**，不存在 risk 那种「机器凭证代劳人的责任动作」的风险面，故全表开放（理由与代价见 ADR-0004）。**签发与分发不在本仓**——本仓只保证「有 token 就能用」。
+4. **三条 `service` 守卫用例**（`internal/httpapi/policy_test.go`）：`TestPolicy_ServiceRoleScope`（service 调 8 条端点都不被闸拦下 **且** viewer 打 POST 仍 403 ⇒ 新增档位不放松既有语义）、`TestPolicy_ServiceRoleCoexistsWithHumanRoles`（service 与真人角色**同在一条 `Roles`**——kit 角色判定 any-of 不排序，顶替真人角色会让真人调用方直接 403）、`TestPolicy_ServiceRoleDeclaredOnEveryRoute`（全表都开；新增端点漏表态即红，逼着做一次显式决定）。
+5. **出站凭证用例补齐**（`internal/upstream/upstream_test.go`）：`TestUpstream_SendsServiceToken` 原来注释写「三个 reader 都必须带 Bearer」但**只测了 `ResultReader` 一个**——注释与实现不符。已补齐 `BenchmarkReader`（resolve + snapshot 两次请求）与 `ArtifactReader`（holdings + 因子暴露两次请求），并保留「空 token 不发 Authorization」这一腿。三条出站面现在都被钉住。
+6. **文档同笔**：`api-schema.md`（§2 角色行 / §7 鉴权现状登记 / §6 抬头）、`dataflow.md`（§2 时序第 0 步）、`ARCHITECTURE.md`（§5 依赖方向图与实况 / §6 决策索引 / §9.4 鉴权注 / §9.7 R2 + R6 两行 / §9.8 取舍 1 与 4）、`AGENTS.md`（§1 状态 / §4 依赖表 contracts 行与 go.mod 注）、`README.md`（鉴权行）、新增 `docs/adr/0004-service角色在本仓全表开放.md` + ADR 索引。
+
+**破坏验证（三条腿，改坏 → 红 → 逐字节还原 → 绿）**
+
+- 腿 A（文档漂移守卫）：删掉 `docs/api-schema.md` 的 **§6.4 整段** ⇒ `TestUpstreamContractMigrationTriggerDocumented` 红（`找不到 "### 6.4" —— 「第二个使用方的触发条件」必须成文（裁决 ③）`），`LEG_A_EXIT=1`；逐字节还原后 `api-schema.md` 的 sha256 改前 / 还原后同为 `A846E5835659C5C3D37CFB4C654E463381703BEF450168B64FECCA75154DADBF`，复跑绿（`LEG_A_RESTORED_EXIT=0`）。
+- 腿 A'（守卫不假绿）：把 §6.4 里的触发措辞弱化（「core 或 orchestration 出现 import analytics DTO 的 Go 代码」→「某些条件下」，「HTTP 交互不算」→「HTTP 交互」）⇒ 同一用例红并**逐条点名**缺哪三个要素（`缺少 "core 或 orchestration"` / `缺少 "import analytics DTO"` / `缺少 "不算"`），`LEG_EXIT=1`；还原后 sha256 一致、复跑绿。
+- 腿 B（策略表守卫）：把 `internal/httpapi/policy.go` 8 条端点的 `"service"` 全部去掉 ⇒ `TestPolicy_ServiceRoleDeclaredOnEveryRoute` 红并**逐条点名**哪条路由的 `Roles` 缺 `service`，`LEG_B_EXIT=1`；逐字节还原后 `policy.go` 的 sha256 改前 / 还原后同为 `0393F150DEF7D40D678E944406CB3CD6AF94E5D19AC715AE24C89BB250478C82`，复跑绿（`LEG_B_RESTORED_EXIT=0`）。
+
+**门禁（真实输出，本机 Windows / Go 1.25.0）**
+
+```
+gofmt -l .                      → 无输出（GOFMT_EXIT=0）
+go build ./...                  → BUILD_EXIT=0
+go vet ./...                    → VET_EXIT=0
+go test ./... -count=1          → TEST_EXIT=0
+  ok  tellurion-analytics/internal/analysis   0.156s
+  ok  tellurion-analytics/internal/httpapi    0.180s
+  ok  tellurion-analytics/internal/upstream   0.151s
+```
+
+**门禁（真实输出，WSL / Go 1.25.0 + **真** PG 16.15；`ANALYTICS_TEST_DSN` 与 `ORCHESTRATION_TEST_DSN` 均设置 ⇒ PG 腿与真进程腿**不是 skip**）**
+
+```
+gofmt -l . → GOFMT_EXIT=0 ；go build ./... → BUILD_EXIT=0 ；go vet ./... → VET_EXIT=0
+go test ./... -count=1 → TEST_EXIT=0
+  ok  tellurion-analytics/internal/analysis   0.344s
+  ok  tellurion-analytics/internal/httpapi    2.208s
+  ok  tellurion-analytics/internal/upstream   0.038s
+PG / 真进程腿逐条实跑（PASS，非 skip）：
+  TestPGMigrateIdempotent / TestPGReportLifecycle / TestPGReportSeedRoundTrip /
+  TestPGCompletedReportIsImmutableInDB / TestPGBenchmarks / TestPGAttributionAndMonteCarlo /
+  TestPGSensitivityBackfill / TestEndToEndWithPostgres / TestSensitivityEndToEndWithOrchestrationProcess
+```
+
+**未落（如实登记）**
+
+1. **token 的签发与分发在 core / 运维侧（跨仓，本仓不落）**：本仓只保证「**有 token 就能用**」——不造 token、不存 token、不分发 token、不建服务账号注册表。签发入口是 kit `v0.1.2` 的 `IssueServiceToken`；注入靠 core `deploy/k8s/analytics-deployment.yaml` 的 `secretKeyRef`（core QT-71 ⑦，本仓无部署面）。派发明令**不许在本仓造 token 分发机制**。
+2. ⚠️ **已知跨仓缺口（不在本仓，本条是本单最需要被下游知道的一条）**：kit `auth/httpadapter.Authenticate`（`v0.1.1` ~ `v0.1.3` 三个版本实测一致）要求 subject 可解析为 `int64`，而裁-17 的生产口径 `sub=service:<repo>` 是**非数字** subject ⇒ 生产 token 会被 kit 判 401「malformed token subject」，**压根到不了本仓的角色判定**。⇒ 本仓的守卫用例证明的是**本仓策略表**正确，**不**证明生产 token 能走通。core 的 `pkg/auth` 已为 service token 开特例（`RoleService` 分支不解析 user id），**net/http 适配这一侧还没有**。该缺口归 kit（放宽 subject 校验）或改裁-17 的 subject 口径，**已报协调者**（与 `tellurion-risk` 的同型缺口同一处，risk 侧记在其 ADR-0006 ④；kit 侧记在其 `docs/TASKS.md` KT-09 结案记录的「跨仓前置（未落）」条）。
+3. **本仓未消费 contracts**：`go.mod` 零 contracts 依赖（守卫 `TestUpstreamContractOwnerStaysLocal` 钉住）。这不是「等契约发布就迁走」的临时态——owner 已裁 = 本仓（裁决 ③）。
+4. **R1 的两条 core 侧残留偏差**（队列态放行 ⇒ pending / running 与引擎故障行读成 `404 run_not_found`；Migration 059 把迁移前的完成行回填成 `completed`）**仍不在本仓**，要修先裁「读面按队列态还是结论态放行」，改在 core。
+5. **本轮仍没有真 core 进程 + 真 PG 的 invalid 行端到端**（沿用 R1 换面记录的缺口，本轮两腿都没碰这条链路）。
+
+**验收现状**：QT-43 的 ⑤ 三条判据维持**真库 E2E** 层成立；本单仍保持 🔶，未落项收窄为「token 分发的跨仓腿（R1 的两条 core 侧残留偏差、真 core 进程的 invalid 行端到端、kit 的 service token subject 缺口）」。
 
 ---
 

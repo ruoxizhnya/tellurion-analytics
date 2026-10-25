@@ -34,7 +34,7 @@ go run ./cmd/analyticsservice -addr 127.0.0.1:8087
 本仓**单独 checkout 就能跑通**上面三条。需要别的仓源码才过 → 边界错了，不是加 `replace` 能解决的问题。
 
 > 不给 `-dsn` 时进程用 Memory Store（仅本地 / 测试）；未配置的上游端口保持 nil，对应端点返回 `503 dependency_unavailable`——这是**有意 fail-closed**（不伪造结果）。
-> 鉴权：有 `JWT_SECRET` 时启用（6 个 POST = trader、2 个 GET = viewer）；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。现状与未落项见 `docs/ARCHITECTURE.md` §9.8、`docs/TASKS.md` QT-43 施工记录。
+> 鉴权：有 `JWT_SECRET` 时启用（6 个 POST = trader + admin + **service**，2 个 GET = viewer + trader + admin + **service**）；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。`service` 是服务间角色（core 代机器调本服务用，ADR-0004）：签发与分发**不在本仓**，本仓只保证「有 token 就能用」。现状与未落项见 `docs/ARCHITECTURE.md` §9.8、`docs/TASKS.md` QT-43 施工记录。
 
 ## 边界
 

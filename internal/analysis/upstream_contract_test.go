@@ -2,7 +2,16 @@ package analysis
 
 import (
 	"encoding/json"
+	"fmt"
+	"go/parser"
+	"go/token"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"reflect"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -128,4 +137,112 @@ func TestServiceAttributionRequiresArtifactDatasetHash(t *testing.T) {
 	if len(store.reports) != 0 {
 		t.Fatalf("fail-closed must not persist a report, got %d", len(store.reports))
 	}
+}
+
+// contractsModulePath 是本仓**不得**依赖的跨仓模块（裁决 ③：DTO owner 留在本仓）。
+const contractsModulePath = "github.com/ruoxizhnya/tellurion-contracts"
+
+// TestUpstreamContractOwnerStaysLocal 钉住「DTO 的 owner = 本仓」。
+//
+// 裁决 ③（tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md）
+// 判定：`analysis` DTO 留在 analytics 本仓，**不进** contracts；迁移的触发条件是
+// 「core 或 orchestration 出现 import analytics DTO 的 Go 代码」。
+//
+// 本用例守的是触发条件的**反面**：本仓自己一旦 import contracts 的任何包，就说明 DTO 的
+// owner 已经被挪走（或至少开始依赖别处的 DTO）⇒ 触发条件已命中而裁决没跟着改 ⇒ 红。
+//
+// 判据从**源码**推导（go/ast 扫全仓 .go 文件的 import），不是手写清单：手写清单会在有人
+// 新增一条 import 时过期，而那时守卫还是绿的——那正是最糟的假绿。
+func TestUpstreamContractOwnerStaysLocal(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var offenders []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "vendor", "node_modules", "testdata":
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".go") {
+			return nil
+		}
+		raw, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		file, perr := parser.ParseFile(token.NewFileSet(), path, raw, parser.ImportsOnly)
+		if perr != nil {
+			return fmt.Errorf("parse %s: %w", path, perr)
+		}
+		for _, imp := range file.Imports {
+			p, uerr := strconv.Unquote(imp.Path.Value)
+			if uerr != nil {
+				continue
+			}
+			if p == contractsModulePath || strings.HasPrefix(p, contractsModulePath+"/") {
+				rel, _ := filepath.Rel(root, path)
+				offenders = append(offenders, filepath.ToSlash(rel)+" → "+p)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan repo sources: %v", err)
+	}
+	if len(offenders) > 0 {
+		sort.Strings(offenders)
+		t.Fatalf("本仓不得 import %s —— DTO 的 owner 是本仓（裁决 ③）。\n"+
+			"要迁到 contracts，先改 docs/api-schema.md §6.4 的触发条件与裁决记录，再改这里的判据。\n%s",
+			contractsModulePath, strings.Join(offenders, "\n"))
+	}
+}
+
+// TestUpstreamContractMigrationTriggerDocumented 钉住「第二个使用方的触发条件」必须成文。
+//
+// 裁决 ③ 把触发条件写死为「core 或 orchestration 出现 import analytics DTO 的 Go 代码」，
+// 并明确 **HTTP 交互不算**。这两个要素是**将来**要不要迁 contracts 的唯一判据 —— 只活在
+// 某个人的脑子里，就会在第二个使用方出现时被漏掉（DTO 停在两边各一份的窗口）。
+//
+// 本用例读**文档正文**（docs/api-schema.md §6.4），逐条查两个要素：§6.4 存在、写明
+// core / orchestration 的 Go import 措辞、写明 HTTP 交互不算。缺任一条 ⇒ 红。
+func TestUpstreamContractMigrationTriggerDocumented(t *testing.T) {
+	doc := readRepoFile(t, filepath.Join("..", "..", "docs", "api-schema.md"))
+	const section = "### 6.4"
+	idx := strings.Index(doc, section)
+	if idx < 0 {
+		t.Fatalf("docs/api-schema.md 里找不到 %q —— 「第二个使用方的触发条件」必须成文（裁决 ③）。", section)
+	}
+	body := doc[idx:]
+	// 只看本节，别把后面章节的词算进来。
+	if end := strings.Index(body[1:], "\n## "); end >= 0 {
+		body = body[:end+1]
+	}
+
+	for _, want := range []struct {
+		needle string
+		why    string
+	}{
+		{"core 或 orchestration", "触发条件必须点名两个候选使用方（core / orchestration）"},
+		{"import analytics DTO", "触发条件说的是 Go 代码 import analytics DTO，不是别的形式"},
+		{"HTTP 交互", "必须写明 HTTP 交互这条排除项"},
+		{"不算", "必须写明「HTTP 交互不算」第二个使用方"},
+	} {
+		if !strings.Contains(body, want.needle) {
+			t.Errorf("docs/api-schema.md %s 段缺少 %q —— %s", section, want.needle, want.why)
+		}
+	}
+}
+
+// readRepoFile 读仓内文件；读不到直接失败（护栏自己失效比没有护栏更糟）。
+func readRepoFile(t *testing.T, rel string) string {
+	t.Helper()
+	raw, err := os.ReadFile(rel)
+	if err != nil {
+		t.Fatalf("read %s: %v", rel, err)
+	}
+	return string(raw)
 }
