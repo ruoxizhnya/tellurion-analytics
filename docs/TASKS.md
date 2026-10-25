@@ -259,6 +259,8 @@ go test ./... -count=1          → TEST_EXIT=0
 
 **验收现状**：QT-43 的 ⑤ 三条判据维持**真库 E2E** 层成立（W8 记录）；本单保持 🔶，未落项收窄为「R2 owner / contracts 迁移、token 分发、R1 的两条 core 侧残留偏差、真 core 进程的 invalid 行端到端」。
 
+> **⚠️ 本段已被下方 H6 记录取代（2026-10-26）**：R2 owner 已落本仓（`api-schema.md` §6.4），token 的**本仓腿**已落（`-core-token` / `-data-token`，`ca95f1e`），剩「token 的跨仓签发/注入」；未落项以 H6 记录的收窄版为准。
+
 #### 施工记录（2026-10-26，H6：R2 契约化落在本仓 + token 分发的本仓腿）
 
 > **依据（先证伪再动手）**：派发原文的 R2 腿要求「按裁决 ③ 留在本仓，不迁 contracts」，且**三个校验器语义不动**。实测确认现状与裁决一致：① `internal/analysis/upstream_contract.go` 的 `UpstreamContractVersion = "v1"` 与三个校验器（`validateResultContract` / `validatePortfolioSnapshot` / `validateFactorExposures`）已在本仓落地；② core 对 `tellurion-analytics` 的 Go import 实测 **0 处**（core 内 `PortfolioSnapshot` 26 处命中全是 core 自己的私有符号 `pkg/alert/manager.go:76` 等，`FactorExposure` / `AnalysisReport` 零命中）；③ orchestration 与本仓**只经 HTTP** 交互（`internal/upstream/sensitivity.go` 走 `POST /api/runs/parents`）；④ contracts 仓当前包清单实测只有 `dataprotocol` / `domain` / `engine` / `fees`，**无 `analysis` 包**（远端最新 tag `v0.6.0` 与 `origin/main` 同）⇒ **没有第二个 Go 使用方**，触发条件未命中。
