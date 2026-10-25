@@ -11,6 +11,8 @@ verified-by: H6（R2 owner 落本仓 + 触发条件成文于 api-schema §6.4；
 > 每张单六字段（① 目标 ② 上下文 ③ 要求 ④ 约束与非目标 ⑤ 验收 ⑥ 边界），判据见 `tellurion:AGENTS.md` §8.5。
 > 完成即标 ✅（附日期）并移入 `docs/archive/TASKS-YYYY-MM-DD-archived.md`；本文件只留未完成项。
 
+> **第三轮裁决指针（2026-10-25）**：⑪ R3 **终态 = 执行侧装配**（core worker 用 `run_id` 锚点从 `backtest_jobs` 回源），本仓 `base_run_spec={run_id}` 是终态、不是 interim ⇒ 该项可标 ✅；⑲ R1 读面改**结论态放行**（pending/running 409 `run_result_incomplete`、failed 409 `run_result_failed`、404 只给不存在）**改在 core**，本仓 wire 码已就绪。正文见 `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-25.md` §五。
+
 ---
 
 ## 一、本仓任务
