@@ -10,7 +10,7 @@
 |---|---|
 | `internal/analysis/` | 纯函数计算（metrics / benchmark / attribution / montecarlo / correlation / export）+ 端口 + Memory / PG Store + DDL |
 | `internal/upstream/` | 上游读取适配器（结果 / X1b 基准 / holdings / 因子暴露） |
-| `internal/httpapi/` | 8 个 HTTP 端点、严格解码、错误码映射 |
+| `internal/httpapi/` | 8 个 HTTP 端点、严格解码、错误码映射、全端点鉴权闸（`auth.go` = kit 适配，`policy.go` = 策略表） |
 | `cmd/analyticsservice/` | 进程入口（默认 `127.0.0.1:8087`） |
 | `docs/` | 本仓文档：台账 / 边界 / 决策 / 归档 —— 从这里进：`docs/README.md` |
 | `AGENTS.md` | 本仓入口（构建、边界、禁止、依赖版本） |
@@ -32,7 +32,8 @@ go run ./cmd/analyticsservice -addr 127.0.0.1:8087
 
 本仓**单独 checkout 就能跑通**上面三条。需要别的仓源码才过 → 边界错了，不是加 `replace` 能解决的问题。
 
-> 不给 `-dsn` 时进程用 Memory Store（仅本地 / 测试）；未配置的上游端口保持 nil，对应端点返回 `503 dependency_unavailable`——这是**有意 fail-closed**（不伪造结果）。现状与未落项见 `docs/ARCHITECTURE.md` §9.8、`docs/TASKS.md` QT-43 施工记录。
+> 不给 `-dsn` 时进程用 Memory Store（仅本地 / 测试）；未配置的上游端口保持 nil，对应端点返回 `503 dependency_unavailable`——这是**有意 fail-closed**（不伪造结果）。
+> 鉴权：有 `JWT_SECRET` 时启用（6 个 POST = trader、2 个 GET = viewer）；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。现状与未落项见 `docs/ARCHITECTURE.md` §9.8、`docs/TASKS.md` QT-43 施工记录。
 
 ## 边界
 

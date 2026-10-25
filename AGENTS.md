@@ -8,7 +8,7 @@
 
 **状态**：已启动（2026-10-23，QT-43 施工 ①）——X4a~X4d 的代码与测试已落盘，`go build/vet/test` 全绿；**PG Store 与上游读取端口已于 2026-10-24（施工 ②）接线**，未配置的上游端口仍 fail-closed 成 `503 dependency_unavailable`。现状详见 `docs/ARCHITECTURE.md` §9.8，未落项见 `docs/TASKS.md` QT-43 施工记录（sensitivity 逐点回填等 X5b）。
 
-**今天的实现**：本仓自有 `internal/analysis`（纯函数 + 端口 + Memory Store + DDL）、`internal/httpapi`（8 端点）、`cmd/analyticsservice`。上游计算口径的参考实现仍在 core（`core:pkg/backtest/metrics`、`core:pkg/backtest/reporting`），本仓**只对照公式、不 import**。
+**今天的实现**：本仓自有 `internal/analysis`（纯函数 + 端口 + Memory Store + DDL）、`internal/httpapi`（8 端点，全部过鉴权闸；`auth.go` 是 kit 适配，`policy.go` 是策略表）、`cmd/analyticsservice`。上游计算口径的参考实现仍在 core（`core:pkg/backtest/metrics`、`core:pkg/backtest/reporting`），本仓**只对照公式、不 import**。
 
 ## 2. 构建 / 测试（必须单仓可跑）
 
@@ -52,7 +52,7 @@ go test ./...
 | 依赖 | 版本 | 说明 |
 |---|---|---|
 | `github.com/ruoxizhnya/tellurion-contracts` | 未引入（最新 `v0.3.0`，2026-10-23 发版；仍无 `analysis` 包） | 契约仓的 `analysis` 包未发布；本仓暂以 `internal/analysis/model.go` 的本地 DTO 镜像冻结形状（只消费、不输出） |
-| `github.com/ruoxizhnya/tellurion-kit` | 未引入（`v0.1.0` 已发版） | 日志 / 统计 / HTTP；当前只用标准库 |
+| `github.com/ruoxizhnya/tellurion-kit` | `v0.1.1` | 鉴权机制：`auth`（token 解析）+ `auth/httpadapter`（net/http 适配、启动闸、Policy）。本仓只写策略表，不另造 token 校验 |
 | `github.com/jackc/pgx/v5` | `v5.11.0` | `analysis.*` 的 PG 连接池与迁移执行（`internal/analysis/pgstore.go`）；选 pgx 而非 `database/sql` 驱动是为了直接拿 `pgxpool` 与 `pgtype` 的 NULL 语义 |
 
 > `go.mod` 现在只有上面这一条直接依赖（2026-10-24，施工 ②）。契约发布后按 `docs/ARCHITECTURE.md` §9.8 迁走本地镜像。

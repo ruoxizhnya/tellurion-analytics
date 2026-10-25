@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-24
-verified-by: QT-43 施工 ②（PG Store / 启动迁移 / 上游读取端口接线 + 真库端到端）
+last-verified: 2026-10-25
+verified-by: W3 鉴权接线（kit net/http 适配 + 8 端点策略表 + 启动闸）
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -121,6 +121,32 @@ verified-by: QT-43 施工 ②（PG Store / 启动迁移 / 上游读取端口接�
 5. **PDF**：非目标，不做。
 
 **验收现状**：`go build ./...` / `go vet ./...` / `go test ./...` 全绿（输出见提交说明）；⑤ 三条判据维持真库 E2E 层成立。本单保持 🔶，原因已从「R1/R2 契约化 + 鉴权」收窄为「R1 持久读面、R2 owner / contracts 迁移、sensitivity 回填、鉴权接线」。
+
+#### 施工记录（2026-10-25，W3：鉴权接线）
+
+**已落**
+
+1. **机制接 kit**：`internal/httpapi/auth.go` 的 `Authorizer` 由 `NewAuthorizer(*auth.TokenService)` 实现，内部走 kit `v0.1.1` 的 `auth/httpadapter`（Bearer → `Parse` → 拒 `kind!=access` → 校验 subject；角色 any-of）；`requireAuth` 三态：未装配 503、无凭证/坏 token 401、越权 403。
+2. **策略表**：`internal/httpapi/policy.go`——6 个 POST = trader，2 个 GET = viewer；路由注册与策略表同源（`routes()`），`New` 逐个包 `requireAuth`。
+3. **现状登记翻转**：`AuthStatus = "enforced"`（原 `unwired`）；`TestAuthNotWiredCurrentState` 改写为 `TestAuthEnforcedCurrentState`（无凭证/坏 token 401、6 个 POST viewer 403、trader 可执行、viewer 可读），**不是删除**。
+4. **守卫**：`TestRouteTableEqualsPolicyTable` 双向对拍 8 条路由 ≡ 8 条策略。
+5. **启动闸**：`cmd/analyticsservice` 新增 `-jwt-secret` / `JWT_SECRET` 与 `-insecure-exposure` / `AUTH_INSECURE_EXPOSURE`；`DecideStartup`——有 secret 开鉴权，无 secret + 回环 = 开放，无 secret + 非回环 = 拒绝启动。
+6. **依赖登记**：`github.com/ruoxizhnya/tellurion-kit v0.1.1`。
+7. **文档同笔**：`api-schema.md` §2/§7/头部、`ARCHITECTURE.md` §9.4/§9.7 R6/§9.8、ADR-0003 + 索引。
+
+**破坏验证**
+
+删掉 `internal/httpapi/policy.go` 的 `GET /api/analysis/reports/{id}/export` 条目 ⇒ `TestRouteTableEqualsPolicyTable` 红（route 8 vs policy 7）、`TestAuthEnforcedCurrentState` 红（该路由无凭证期望 401 实得 403）；逐字节还原（`sha256 21E9FEF1…`）后两条复跑绿。
+
+**验收**：`go build ./... && go vet ./... && go test ./... -count=1` 全绿。
+
+**未落（本单仍 🔶）**
+
+1. **R1 的 K9-correct 持久读面**：核心在 core 侧，本仓仍是 interim 适配器（见上一条施工记录）。
+2. **R2 artifact 的 owner 与最终形状**：owner 未定、未迁 `tellurion-contracts`。
+3. **sensitivity 逐点回填**：仍只提交，依赖 QT-44（X5b）。
+4. **token 分发（跨仓）**：鉴权开启后 core / UI 调用本服务必须持 token（POST trader / GET viewer）；分发不在本仓。
+5. **PDF**：非目标，不做。
 
 ---
 

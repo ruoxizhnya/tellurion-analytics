@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-24
-verified-by: QT-43 施工 ②（PG 持久化 + 上游读取适配器接线）
+last-verified: 2026-10-25
+verified-by: W3 鉴权接线（kit net/http 适配 + 8 端点策略表 + 启动闸）
 ---
 
 # Dataflow — tellurion-analytics
@@ -26,6 +26,9 @@ verified-by: QT-43 施工 ②（PG 持久化 + 上游读取适配器接线）
 
 ## 2. 关键时序
 
+0. **鉴权闸**（2026-10-25）：每个请求先过 `requireAuth`——未装配 Authorizer → 503 `auth_unavailable`，
+   无凭证 / 坏 token → 401，角色不足 → 403；6 个 POST 需 `trader` 及以上，2 个 GET 需 `viewer` 及以上。
+   通过后才进入下面的计算 / 读取链路。
 1. `POST /api/analysis/metrics {run_id}` → 拉结果 DTO → 分区（`from_result` 原样 / `computed` 补算）→ 落 `analysis.reports`
 2. `POST /api/analysis/benchmark {run_id, benchmark_code, window?}` → 查 `analysis.benchmarks` 最新登记 → 取基准序列（data）→ 对齐 → 超额 / TE / IR / beta / 滚动 → 落报告
 3. `POST /api/analysis/attribution {run_id, method}` → brinson 读 holdings artifact / factor 读因子暴露 → 分项 + residual → 落 `analysis.reports` + `analysis.attribution`
@@ -48,6 +51,7 @@ verified-by: QT-43 施工 ②（PG 持久化 + 上游读取适配器接线）
 
 | 失败点 | 症状 | 兜底 |
 |---|---|---|
+| 鉴权闸未装配 / 角色不足 | 分析面被匿名调用 | 统一 fail-closed：未装配 503，无凭证 401，越权 403（2026-10-25） |
 | 缺 seed | 结果不可复现 | 400 `seed_required`，拒算 |
 | 上游结果不完整 | 指标算出来是错的 | 409 `run_result_incomplete`，点名缺哪个输入（`portfolio_values` / `benchmark_series` / `run result`） |
 | 结果读取面把 invalid / failed 当 completed | 产出「看起来正常」的假报告 | 三值分别拒算（`ARCHITECTURE.md` §9.1 F1）；**不解析 job 错误串**；缺 `status` 的异步结果直接 409 |

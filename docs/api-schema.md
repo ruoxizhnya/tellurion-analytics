@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-25
-verified-by: QT-43 施工 ③（R1/R2 契约化 + 鉴权现状登记）
+verified-by: W3 鉴权接线（kit net/http 适配 + 8 端点策略表；6 POST = trader / 2 GET = viewer）
 ---
 
 # API Schema — tellurion-analytics
@@ -13,7 +13,10 @@ verified-by: QT-43 施工 ③（R1/R2 契约化 + 鉴权现状登记）
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
 > 跨仓消费方（core / agent / ui / 其他服务）按本文件编码，**不读本仓实现**。
 > **请求 / 响应形状**：本文只冻结**路径、错误码、幂等与兼容**；逐端点的目标签名、DTO 字段与版本策略见 `ARCHITECTURE.md` §9（M8 接口对表），两处必须同步改，不复制形状。
-> **鉴权**：按 core `QT-50 ④` 统一（JWT + RBAC），默认 fail-closed；本仓不另定鉴权契约。**当前未接线鉴权**（`ARCHITECTURE.md` §9.7 R6），进程只监听回环地址——现状登记见 §7。
+> **鉴权（2026-10-25 已接线，ADR-0003）**：机制在 kit `v0.1.1` 的 `auth/httpadapter`（Bearer → `Parse` →
+> `kind=access` → 角色 any-of），策略表在本仓 `internal/httpapi/policy.go`；**全部端点**过闸且 fail-closed：
+> 未装配 Authorizer → 503，无凭证 / 坏 token → 401，越权 → 403。6 个 POST = trader，2 个 GET = viewer。
+> 无 secret + 回环 = 开放；无 secret + 非回环 = **拒绝启动**。现状登记见 §7。
 > **前置现状**：sensitivity 的 job 队列依赖 G7/X5b（`tellurion-orchestration` QT-44，**未落**，该端点 503）；结果读取走 R1 落地前的 interim 适配器（无 `status` 的异步结果 fail-closed）；基准走 X1b（已落）；holdings / 因子暴露走 interim artifact 面（R2 形状未冻结）。缺依赖即报错，不降级出假报告。
 
 ## 1. 接口面
@@ -44,8 +47,9 @@ verified-by: QT-43 施工 ③（R1/R2 契约化 + 鉴权现状登记）
 
 | 情况 | 返回 | 说明 |
 |---|---|---|
-| 无凭证 / token 过期 | 401 `unauthenticated`（body 随 QT-50 ④ 统一面） | 不重试，补齐凭证。**目标态，当前未实现**（§7） |
-| 角色不足 | 403 `forbidden` | 不重试。**目标态，当前未实现**（§7） |
+| 无凭证 / token 过期 | 401 `unauthenticated` | 不重试，补齐凭证。✅ 全部端点（2026-10-25） |
+| 角色不足（读 viewer / 写 trader） | 403 `forbidden` | 不重试。✅ 全部端点（2026-10-25） |
+| 鉴权闸未装配 | 503 `auth_unavailable` | 不重试；服务端装配问题。✅ |
 | 请求体 / 参数非法（含 `n<=0`、空网格、ID 数越界） | 400 `invalid_params` | 修正后重试 |
 | 归因方法不支持 | 400 `method_not_supported` | 只接受 `brinson` / `factor` |
 | 缺 `seed`（蒙特卡洛） | 400 `seed_required` | **fail-closed**：没有种子就不算（`seed=0` 是合法显式种子） |
@@ -157,10 +161,10 @@ verified-by: QT-43 施工 ③（R1/R2 契约化 + 鉴权现状登记）
 
 ## 7. 鉴权现状登记（2026-10-25）
 
-> 本节记录**今天的事实**，不是目标态。目标态见 §2 的 401 / 403 两行与 `ARCHITECTURE.md` §9.7 R6；两者不得混读。
+> 本节记录**今天的事实**。目标口径见 `ARCHITECTURE.md` §9.7 R6；两者不得混读。
 
-- **代码登记**：`httpapi.AuthStatus = "unwired"`（`internal/httpapi/auth_status.go`）。改鉴权必须同时改这个常量，否则 `TestAuthNotWiredCurrentState` 直接红。
-- **事实**：`Server` **不装鉴权中间件**、**不读** `Authorization`、**不产出** 401 / 403；任何调用方（含伪造 `Bearer`）只要路径与参数合法即得 2xx。§2 的 401 `unauthenticated` / 403 `forbidden` **尚未实现**。
-- **可执行锚点**：`TestAuthNotWiredCurrentState` —— 无凭证、伪造 `Bearer not-a-real-token` 均断言 `200`。接线鉴权时该用例应转红，届时**改写**为 401 断言，而非删除。
-- **当前安全边界**：仅靠部署侧监听回环（`cmd/analyticsservice` 默认 `127.0.0.1:8087`）。**不要把本服务暴露到非回环地址**——这等于公开无鉴权端点。
-- **接线清单（QT-50 ④ 落地时一并改）**：① `AuthStatus` 常量与 `TestAuthNotWiredCurrentState`；② 本节与 §2 两行去掉「未实现」；③ `ARCHITECTURE.md` §9.7 R6；④ `docs/TASKS.md` QT-43 的「鉴权」条目。
+- **代码登记**：`httpapi.AuthStatus = "enforced"`（`internal/httpapi/auth_status.go`）。改鉴权必须同时改这个常量，否则 `TestAuthEnforcedCurrentState` 直接红。
+- **事实**：`Server` 的每个端点都过 `requireAuth`（kit `auth/httpadapter`）：未装配 Authorizer → 503，无凭证 / 坏 token → 401，角色不足 → 403。策略表：6 个 POST = trader，2 个 GET = viewer（`internal/httpapi/policy.go`）。
+- **可执行锚点**：`TestAuthEnforcedCurrentState` —— 8 条路由无凭证一律 401、6 个 POST 的 viewer 一律 403、trader 可执行、viewer 可读；`TestRouteTableEqualsPolicyTable` 钉住路由表 ≡ 策略表。
+- **启动闸**：有 `JWT_SECRET` 启用鉴权；无 secret + 回环 = 开放（仅本地开发）；无 secret + 非回环 = **拒绝启动**。
+- **接线清单（已完成）**：① `AuthStatus` 常量与用例；② 本节与 §2 两行；③ `ARCHITECTURE.md` §9.7 R6；④ `docs/TASKS.md` QT-43 的「鉴权」条目。

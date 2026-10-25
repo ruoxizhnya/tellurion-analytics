@@ -2,8 +2,8 @@ package httpapi
 
 // AuthStatus 是本服务鉴权现状的唯一代码登记（docs/api-schema.md §7）。
 //
-// "unwired" = QT-50 ④ / R6 未落：Server 不装鉴权中间件、不读 Authorization、
-// 不产出 401 / 403；安全边界依赖部署侧只监听回环（cmd/analyticsservice 默认
-// 127.0.0.1:8087）。接线鉴权时改本常量、重写 TestAuthNotWiredCurrentState，
-// 并同步 docs/api-schema.md §7 与 docs/TASKS.md——不要只改代码。
-const AuthStatus = "unwired"
+// "enforced" = 裁-15 已接线：Server 的每个端点都过 requireAuth（kit auth/httpadapter），
+// 未装配 Authorizer → 503，无凭证 → 401，角色不足 → 403；策略表见 policy.go。
+// 改鉴权必须同时改本常量、重写 TestAuthEnforcedCurrentState，并同步 docs/api-schema.md §7
+// 与 docs/TASKS.md——不要只改代码。
+const AuthStatus = "enforced"

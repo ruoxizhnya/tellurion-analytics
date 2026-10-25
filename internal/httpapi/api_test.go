@@ -66,6 +66,16 @@ func sampleResult(id string) *analysis.BacktestResponse {
 }
 
 func newTestServer(t *testing.T, opts analysis.Options) (*httptest.Server, *analysis.Service) {
+	return newTestServerWithAuthorizer(t, opts, allowAllAuthorizer{})
+}
+
+// allowAllAuthorizer 让既有功能测试聚焦业务语义；鉴权本身由 auth_status_test.go
+// 用真 kit TokenService 覆盖。
+type allowAllAuthorizer struct{}
+
+func (allowAllAuthorizer) Authorize(*http.Request) error { return nil }
+
+func newTestServerWithAuthorizer(t *testing.T, opts analysis.Options, authorizer Authorizer) (*httptest.Server, *analysis.Service) {
 	t.Helper()
 	if opts.Store == nil {
 		opts.Store = analysis.NewMemory()
@@ -75,7 +85,7 @@ func newTestServer(t *testing.T, opts analysis.Options) (*httptest.Server, *anal
 	if err != nil {
 		t.Fatalf("analysis.New: %v", err)
 	}
-	srv := httptest.NewServer(New(svc).Handler())
+	srv := httptest.NewServer(New(svc, WithAuthorizer(authorizer)).Handler())
 	t.Cleanup(srv.Close)
 	return srv, svc
 }

@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-24
-verified-by: QT-43 施工 ②（PG Store / 启动迁移 / 上游读取适配器接线 + 真库端到端）
+last-verified: 2026-10-25
+verified-by: W3 鉴权接线（kit net/http 适配 + 8 端点策略表 + 启动闸，ADR-0003）
 ---
 
 # 架构 — tellurion-analytics
@@ -123,7 +123,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 ### 9.4 C 组 · 服务对外 HTTP 面（升格后）
 
-> **鉴权**：按 core `QT-50 ④`（JWT + RBAC）统一，本仓不另定。本仓全部为只读语义（POST = 提交计算），目标：service 角色（UI 经网关携带用户身份另议）；**无 token / 过期 / 角色不足即拒绝**（`401 unauthenticated` / `403 forbidden`），默认 fail-closed。
+> **鉴权（2026-10-25 已接线，ADR-0003）**：机制在 kit `v0.1.1` 的 `auth/httpadapter`（`Parse` + `kind==access` + 角色 any-of + 启动闸），策略表在本仓 `internal/httpapi/policy.go`。**全部端点** fail-closed：未装配 Authorizer → `503 auth_unavailable`，无 token / 过期 / refresh 当 access → `401 unauthenticated`，角色不足 → `403 forbidden`。6 个 POST = trader、2 个 GET = viewer；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。
 > **wire 契约落点**：core `docs/openapi.yaml`（QT-50 ③-③）。今天它没有下表端点；下表在升格前是目标草案，**不复制进 openapi**。
 > **错误码**：与 `docs/api-schema.md` §2 双向一一对应。
 
@@ -167,7 +167,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 | R3 | **sensitivity 的 job 队列**（F3） | QT-44 的 X5b 未落（`tellurion-orchestration` 施工记录：X5a/X5c 已落，batch/walkforward 未做）；本仓 `SensitivityQueue.Submit(report_id, run_id, grid)` 端口已就位，队列 nil ⇒ 503 | X4c 开工前拍；本仓只做提交与汇总，不做回测循环。逐点结果回填（`analysis.sensitivity_runs.points`）随 QT-44 的 `Complete` 载荷落地 |
 | R4 | **基准数据面与口径**（F4） | **X1b 已落**（`tellurion-data` `/datasets/resolve` + `/datasets/{hash}`）；本仓 `BenchmarkReader` 已接 X1b，按登记的 `adjustment_basis` 取数，basis 不一致即 409 | 保持 `adjustment_basis` 在登记身份里；若将来改走别的数据面，只换适配器 |
 | R5 | **PDF 导出** | **已裁（2026-10-24）= 非目标**：core 现状只有 html（用浏览器打印），无渲染器 | 从目标面移除；只承诺 html / csv（`api-schema.md` §1 / §4）。不引入渲染器、不立 ADR |
-| R6 | **鉴权角色矩阵** | QT-50 ④ 统一面未落定 | 本文只冻结「默认 fail-closed，无凭证不服务」；角色名与 401/403 body 随 QT-50 对齐 |
+| R6 | **鉴权角色矩阵** | **已裁（2026-10-25）**：6 个 POST = trader、2 个 GET = viewer；机制在 kit `auth/httpadapter`，策略表在本仓 `internal/httpapi/policy.go`（ADR-0003） | 全端点 fail-closed；无 secret + 非回环拒绝启动 |
 
 ### 9.8 实现现状（2026-10-24，QT-43 施工 ②）
 
@@ -210,7 +210,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 3. **R1 未落 ⇒ ResultReader 是 interim**：读 core 现有 report 端点，有 `status` 才映射三值；无 `status` 的异步结果 fail-closed，**不解析错误串**。
 4. **R2 未裁 ⇒ artifact 形状是临时的**：`GET /runs/{id}/portfolio-snapshot` / `/factor-exposures` 是 interim wire 形状；owner 与最终形状定了再迁 contracts，端口不变。
 5. **不落 `analysis.sensitivity_runs.points`**：逐点结果字段依赖 G7/X5b 的 `Complete` 载荷（R3），不预先编形状。
-6. **鉴权未接线**：QT-50 ④ 未落（R6）；进程只监听回环，避免暴露无鉴权端点。
+6. **鉴权已接线（2026-10-25）**：kit `auth/httpadapter` + 本仓策略表，全端点 401/403/503 fail-closed（ADR-0003）。
 7. **`Migrations()` 只返回副本**，没有「按版本号执行 / 回滚」——与 core / risk 同一取向（`docs/db-schema.md` §4）。
 
 **自检（2026-10-24）**：`gofmt -l .` 无输出；`go build ./...`、`go vet ./...`、`go test ./... -count=1` 全绿。带真库：`ANALYTICS_TEST_DSN='postgres://postgres:postgres@127.0.0.1:5432/tellurion_analytics_test?sslmode=disable' go test ./... -count=1` 全绿（PG 17.5）。测试覆盖：三值 fail-closed、`seed` 规则（nil / 0 / 上界）、同 seed 字节一致、`report_id` 各键敏感性、`completed` 不可变（含触发器直连）、Brinson / 因子恒等式（`1e-8`）、相关性 30 点边界与对角 1.0、导出确定性、13 个 wire code 与 503、PG 迁移幂等与真库 E2E。

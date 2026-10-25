@@ -16,23 +16,54 @@ const MaxBodyBytes = 1 << 20
 // Server 是分析服务的 HTTP 面（8 个端点，docs/api-schema.md §1）。
 //
 // 未接线的上游端口由 Service fail-closed 成 503 dependency_unavailable；
-// 本层不伪造结果、不做鉴权（QT-50 ④ 统一面未落，见 docs/ARCHITECTURE.md §9.7 R6）。
+// 所有端点都过鉴权闸（裁-15 / docs/ARCHITECTURE.md §9.7 R6）。
 type Server struct {
-	svc *analysis.Service
-	mux *http.ServeMux
+	svc        *analysis.Service
+	authorizer Authorizer
+	mux        *http.ServeMux
 }
 
-// New 构造 Server 并注册路由。
-func New(svc *analysis.Service) *Server {
+// Option 按需装配可选面（当前只有鉴权闸）。
+type Option func(*Server)
+
+// routeSpec 是「注册模式 + handler」；路由表与 policy 表由守卫测试双向对拍。
+type routeSpec struct {
+	pattern string
+	handler http.HandlerFunc
+}
+
+func (s *Server) routes() []routeSpec {
+	return []routeSpec{
+		{"POST /api/analysis/metrics", s.metrics},
+		{"POST /api/analysis/benchmark", s.benchmark},
+		{"POST /api/analysis/attribution", s.attribution},
+		{"POST /api/analysis/sensitivity", s.sensitivity},
+		{"POST /api/analysis/montecarlo", s.monteCarlo},
+		{"POST /api/analysis/correlation", s.correlation},
+		{"GET /api/analysis/reports/{id}", s.getReport},
+		{"GET /api/analysis/reports/{id}/export", s.exportReport},
+	}
+}
+
+// routePatterns 只返回注册模式，守卫测试用它与 policy 表对拍。
+func (s *Server) routePatterns() []string {
+	specs := s.routes()
+	out := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		out = append(out, spec.pattern)
+	}
+	return out
+}
+
+// New 构造 Server 并注册路由。每个路由都挂 requireAuth（未装配 Authorizer → 503）。
+func New(svc *analysis.Service, opts ...Option) *Server {
 	s := &Server{svc: svc, mux: http.NewServeMux()}
-	s.mux.HandleFunc("POST /api/analysis/metrics", s.metrics)
-	s.mux.HandleFunc("POST /api/analysis/benchmark", s.benchmark)
-	s.mux.HandleFunc("POST /api/analysis/attribution", s.attribution)
-	s.mux.HandleFunc("POST /api/analysis/sensitivity", s.sensitivity)
-	s.mux.HandleFunc("POST /api/analysis/montecarlo", s.monteCarlo)
-	s.mux.HandleFunc("POST /api/analysis/correlation", s.correlation)
-	s.mux.HandleFunc("GET /api/analysis/reports/{id}", s.getReport)
-	s.mux.HandleFunc("GET /api/analysis/reports/{id}/export", s.exportReport)
+	for _, opt := range opts {
+		opt(s)
+	}
+	for _, spec := range s.routes() {
+		s.mux.Handle(spec.pattern, s.requireAuth(spec.handler))
+	}
 	return s
 }
 
