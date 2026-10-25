@@ -273,3 +273,58 @@ func TestPGAttributionAndMonteCarlo(t *testing.T) {
 		t.Fatalf("want ErrReportConflict, got %v", err)
 	}
 }
+
+func TestPGSensitivityBackfill(t *testing.T) {
+	pg := openTestPG(t)
+	ctx := context.Background()
+
+	id := pgID("r-sens")
+	rep := reportFixture(id, ReportPending, "", nil)
+	rep.AnalysisType = TypeSensitivity
+	if err := pg.PutReport(ctx, rep); err != nil {
+		t.Fatalf("PutReport: %v", err)
+	}
+
+	rec := SensitivityRecord{
+		ReportID:    id,
+		RunID:       rep.RunID,
+		Grid:        json.RawMessage(`[{"name":"a","values":[1,2]}]`),
+		ParentJobID: "parent-1",
+		CreatedAt:   pgNow,
+	}
+	if err := pg.PutSensitivity(ctx, rec); err != nil {
+		t.Fatalf("PutSensitivity: %v", err)
+	}
+	if err := pg.PutSensitivity(ctx, rec); err != nil {
+		t.Fatalf("PutSensitivity replay: %v", err)
+	}
+	stored, err := pg.GetSensitivity(ctx, id)
+	if err != nil {
+		t.Fatalf("GetSensitivity: %v", err)
+	}
+	if stored.ParentJobID != "parent-1" || len(stored.Points) != 0 {
+		t.Fatalf("stored = %+v", stored)
+	}
+
+	filled := rec
+	filled.Points = json.RawMessage(`[{"params":{"a":1},"run_id":"child-1","status":"completed"}]`)
+	if err := pg.PutSensitivity(ctx, filled); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if err := pg.PutSensitivity(ctx, filled); err != nil {
+		t.Fatalf("backfill replay: %v", err)
+	}
+	stored, err = pg.GetSensitivity(ctx, id)
+	if err != nil {
+		t.Fatalf("GetSensitivity: %v", err)
+	}
+	if !strings.Contains(string(stored.Points), "child-1") {
+		t.Fatalf("points = %s", stored.Points)
+	}
+
+	changed := filled
+	changed.Points = json.RawMessage(`[{"params":{"a":2},"run_id":"child-2","status":"completed"}]`)
+	if err := pg.PutSensitivity(ctx, changed); !errors.Is(err, ErrReportConflict) {
+		t.Fatalf("want ErrReportConflict on points rewrite, got %v", err)
+	}
+}

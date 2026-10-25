@@ -27,6 +27,7 @@ go test ./...
 ANALYTICS_DATABASE_DSN='postgres://postgres:postgres@127.0.0.1:5432/tellurion_analytics?sslmode=disable' \
 ANALYTICS_CORE_URL='http://127.0.0.1:8085' \
 ANALYTICS_DATA_URL='http://127.0.0.1:8081' \
+ANALYTICS_ORCHESTRATION_URL='http://127.0.0.1:8088' \
 go run ./cmd/analyticsservice -addr 127.0.0.1:8087
 ```
 

@@ -108,6 +108,8 @@ type sensitivityRequest struct {
 type jobResponse struct {
 	ReportID string                `json:"report_id"`
 	Status   analysis.ReportStatus `json:"status"`
+	// ParentJobID 只对 sensitivity 出现（X5b 父作业），montecarlo 不带。
+	ParentJobID string `json:"parent_job_id,omitempty"`
 }
 
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
@@ -161,12 +163,16 @@ func (s *Server) sensitivity(w http.ResponseWriter, r *http.Request) {
 		writeInvalidParams(w, err)
 		return
 	}
-	rep, err := s.svc.Sensitivity(r.Context(), req.RunID, req.ParamGrid)
+	sub, err := s.svc.Sensitivity(r.Context(), req.RunID, req.ParamGrid)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, jobResponse{ReportID: rep.ReportID, Status: rep.Status})
+	writeJSON(w, http.StatusAccepted, jobResponse{
+		ReportID:    sub.Report.ReportID,
+		Status:      sub.Report.Status,
+		ParentJobID: sub.ParentJobID,
+	})
 }
 
 func (s *Server) monteCarlo(w http.ResponseWriter, r *http.Request) {

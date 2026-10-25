@@ -61,6 +61,8 @@ func (f *fakeFactors) GetFactorExposures(_ context.Context, _ string) (FactorExp
 type fakeQueue struct {
 	submitted []SensitivityJob
 	err       error
+	progress  SensitivityProgress
+	statusErr error
 }
 
 func (f *fakeQueue) Submit(_ context.Context, job SensitivityJob) (string, error) {
@@ -69,6 +71,13 @@ func (f *fakeQueue) Submit(_ context.Context, job SensitivityJob) (string, error
 	}
 	f.submitted = append(f.submitted, job)
 	return "job-1", nil
+}
+
+func (f *fakeQueue) Status(_ context.Context, _ string) (SensitivityProgress, error) {
+	if f.statusErr != nil {
+		return SensitivityProgress{}, f.statusErr
+	}
+	return f.progress, nil
 }
 
 var baseDate = time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)

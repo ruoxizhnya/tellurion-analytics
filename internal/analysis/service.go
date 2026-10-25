@@ -216,54 +216,79 @@ func (s *Service) Attribution(ctx context.Context, req AttributionRequest) (Repo
 	return Report{}, fmt.Errorf("%w: %q", ErrMethodNotSupported, req.Method)
 }
 
+// SensitivitySubmission 是敏感性提交的回执：报告 + 上游父作业 id。
+//
+// 父作业 id 进 202 响应（可选字段），让调用方 / 运维能直接查
+// `GET /api/runs/parents/{id}`；它同时落 `analysis.sensitivity_runs.parent_job_id`。
+type SensitivitySubmission struct {
+	Report      Report
+	ParentJobID string
+}
+
 // Sensitivity 把参数网格提交给 X5（QT-44）并建 pending 报告。
 // 队列未接线 ⇒ 503 dependency_unavailable（不在本仓起回测循环）。
-func (s *Service) Sensitivity(ctx context.Context, runID string, grid []GridParam) (Report, error) {
+func (s *Service) Sensitivity(ctx context.Context, runID string, grid []GridParam) (SensitivitySubmission, error) {
 	if strings.TrimSpace(runID) == "" {
-		return Report{}, invalidf("run_id is required")
+		return SensitivitySubmission{}, invalidf("run_id is required")
 	}
-	if len(grid) == 0 {
-		return Report{}, invalidf("param_grid is required")
+	// 参数名归一化一次：展开顺序、params_hash、落库网格与提交给父作业的键必须
+	// 是同一份文本，否则「点 ↔ 参数」会在两处不一致。
+	normalized := make([]GridParam, len(grid))
+	for i, p := range grid {
+		normalized[i] = GridParam{Name: strings.TrimSpace(p.Name), Values: append([]float64(nil), p.Values...)}
 	}
-	seen := make(map[string]struct{}, len(grid))
-	for _, p := range grid {
-		if strings.TrimSpace(p.Name) == "" {
-			return Report{}, invalidf("param_grid name is required")
-		}
-		if len(p.Values) == 0 {
-			return Report{}, invalidf("param_grid %q has no values", p.Name)
-		}
-		if _, dup := seen[p.Name]; dup {
-			return Report{}, invalidf("duplicate param_grid name %q", p.Name)
-		}
-		seen[p.Name] = struct{}{}
+	grid = normalized
+	if _, err := expandGrid(grid); err != nil {
+		return SensitivitySubmission{}, err
 	}
 	resp, err := s.loadResult(ctx, runID)
 	if err != nil {
-		return Report{}, err
+		return SensitivitySubmission{}, err
 	}
 	resultHash, err := hashJSON(resp)
 	if err != nil {
-		return Report{}, err
+		return SensitivitySubmission{}, err
 	}
 	paramsHash, err := hashJSON(struct {
 		Grid []GridParam `json:"param_grid"`
 	}{Grid: grid})
 	if err != nil {
-		return Report{}, err
+		return SensitivitySubmission{}, err
 	}
 	inputHash := hashInputs(resultHash)
 	if rep, ok, err := s.replay(ctx, runID, TypeSensitivity, paramsHash, inputHash, nil); err != nil || ok {
-		return rep, err
+		sub := SensitivitySubmission{Report: rep}
+		if ok {
+			if rec, gerr := s.store.GetSensitivity(ctx, rep.ReportID); gerr == nil {
+				sub.ParentJobID = rec.ParentJobID
+			}
+		}
+		return sub, err
 	}
 	if s.queue == nil {
-		return Report{}, fmt.Errorf("%w: sensitivity job queue (QT-44) is not wired", ErrDependencyUnavailable)
+		return SensitivitySubmission{}, fmt.Errorf("%w: sensitivity job queue (QT-44) is not wired", ErrDependencyUnavailable)
 	}
 	reportID := ReportID(runID, TypeSensitivity, paramsHash, inputHash, nil, MetricsVersion)
-	if _, err := s.queue.Submit(ctx, SensitivityJob{ReportID: reportID, RunID: runID, Grid: grid}); err != nil {
-		return Report{}, fmt.Errorf("%w: %v", ErrDependencyUnavailable, err)
+	parentID, err := s.queue.Submit(ctx, SensitivityJob{ReportID: reportID, RunID: runID, Grid: grid})
+	if err != nil {
+		return SensitivitySubmission{}, fmt.Errorf("%w: %v", ErrDependencyUnavailable, err)
 	}
 	now := s.now().UTC()
+	gridJSON, err := json.Marshal(grid)
+	if err != nil {
+		return SensitivitySubmission{}, err
+	}
+	// 先落网格行（pending 报告是它的外键），再落报告：中途失败时重放能续上，
+	// 不会出现「报告存在但不知道父作业是谁」。
+	if err := s.store.PutSensitivity(ctx, SensitivityRecord{
+		ReportID:    reportID,
+		RunID:       runID,
+		Grid:        gridJSON,
+		ParentJobID: parentID,
+		CreatedAt:   now,
+	}); err != nil {
+		return SensitivitySubmission{}, err
+	}
 	rep := Report{
 		ReportID:       reportID,
 		RunID:          runID,
@@ -276,9 +301,9 @@ func (s *Service) Sensitivity(ctx context.Context, runID string, grid []GridPara
 		UpdatedAt:      now,
 	}
 	if err := s.store.PutReport(ctx, rep); err != nil {
-		return Report{}, err
+		return SensitivitySubmission{}, err
 	}
-	return rep, nil
+	return SensitivitySubmission{Report: rep, ParentJobID: parentID}, nil
 }
 
 // MonteCarlo 用显式种子做重抽样（异步执行，202 + pending）。
@@ -425,11 +450,21 @@ func (s *Service) Correlation(ctx context.Context, runIDs []string) (Report, err
 }
 
 // GetReport 读报告（pending / running / failed 都返回，状态在 body 里说明）。
+//
+// 敏感性报告的 pending → completed/failed 由**读路径**推进：每次读都去看一眼
+// 上游父作业；进程重启不丢进度，轮询天然幂等。其他类型不经过这一步。
 func (s *Service) GetReport(ctx context.Context, reportID string) (Report, error) {
 	if strings.TrimSpace(reportID) == "" {
 		return Report{}, ErrReportNotFound
 	}
-	return s.store.GetReport(ctx, reportID)
+	rep, err := s.store.GetReport(ctx, reportID)
+	if err != nil {
+		return Report{}, err
+	}
+	if rep.AnalysisType == TypeSensitivity && (rep.Status == ReportPending || rep.Status == ReportRunning) {
+		return s.advanceSensitivity(ctx, rep)
+	}
+	return rep, nil
 }
 
 // loadResult 读上游结果并把三值映射成领域哨兵。

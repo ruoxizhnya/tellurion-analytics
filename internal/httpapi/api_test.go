@@ -24,11 +24,18 @@ func (s *stubReader) GetResult(_ context.Context, runID string) (*analysis.Backt
 	return nil, analysis.ErrRunNotFound
 }
 
-type stubQueue struct{ submitted int }
+type stubQueue struct {
+	submitted int
+	progress  analysis.SensitivityProgress
+}
 
 func (s *stubQueue) Submit(_ context.Context, _ analysis.SensitivityJob) (string, error) {
 	s.submitted++
 	return "job-1", nil
+}
+
+func (s *stubQueue) Status(_ context.Context, _ string) (analysis.SensitivityProgress, error) {
+	return s.progress, nil
 }
 
 type stubBenchmarks struct {
@@ -263,7 +270,7 @@ func TestSensitivityPendingAndNotReadyExport(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", status, body)
 	}
 	m := decode(t, body)
-	if m["status"] != "pending" {
+	if m["status"] != "pending" || m["parent_job_id"] != "job-1" {
 		t.Fatalf("job response = %v", m)
 	}
 	if queue.submitted != 1 {
@@ -280,6 +287,45 @@ func TestSensitivityPendingAndNotReadyExport(t *testing.T) {
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(resp.Body)
 	wantCode(t, resp.StatusCode, out, http.StatusConflict, "report_not_ready")
+}
+
+func TestSensitivityCompletedAfterParentSummary(t *testing.T) {
+	queue := &stubQueue{progress: analysis.SensitivityProgress{
+		Status:  "completed",
+		Total:   2,
+		Settled: 2,
+		Points: []analysis.SensitivityChild{
+			{RunID: "child-1", ResultStatus: analysis.ResultCompleted},
+			{RunID: "child-2", ResultStatus: analysis.ResultCompleted},
+		},
+	}}
+	srv, _ := newTestServer(t, analysis.Options{
+		Results: &stubReader{results: map[string]*analysis.BacktestResponse{
+			"r1":      sampleResult("r1"),
+			"child-1": sampleResult("child-1"),
+			"child-2": sampleResult("child-2"),
+		}},
+		Queue: queue,
+	})
+	status, body := post(t, srv, "/api/analysis/sensitivity", `{"run_id":"r1","param_grid":[{"name":"lb","values":[10,20]}]}`)
+	if status != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", status, body)
+	}
+	reportID := decode(t, body)["report_id"].(string)
+
+	resp, raw := get(t, srv, "/api/analysis/reports/"+reportID)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET report = %d %s", resp.StatusCode, raw)
+	}
+	rep := decode(t, raw)
+	if rep["status"] != "completed" {
+		t.Fatalf("status = %v (%v)", rep["status"], rep["error"])
+	}
+	report, _ := rep["report"].(map[string]any)
+	points, _ := report["points"].([]any)
+	if len(points) != 2 || report["parent_job_id"] != "job-1" {
+		t.Fatalf("report = %v", report)
+	}
 }
 
 func TestBenchmarkSuccessAndDataUnavailable(t *testing.T) {

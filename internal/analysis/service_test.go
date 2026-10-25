@@ -148,16 +148,23 @@ func TestServiceSensitivityFailClosedAndPending(t *testing.T) {
 	// 队列已接线 ⇒ pending 报告 + 提交网格
 	queue := &fakeQueue{}
 	svc = newTestService(t, Options{Results: reader, Queue: queue})
-	rep, err := svc.Sensitivity(t.Context(), "r1", []GridParam{{Name: "lookback", Values: []float64{10, 20}}})
+	sub, err := svc.Sensitivity(t.Context(), "r1", []GridParam{{Name: "lookback", Values: []float64{10, 20}}})
 	if err != nil {
 		t.Fatalf("Sensitivity: %v", err)
 	}
-	if rep.Status != ReportPending || len(queue.submitted) != 1 || queue.submitted[0].ReportID != rep.ReportID {
-		t.Fatalf("pending report / queue = %+v / %+v", rep, queue.submitted)
+	if sub.Report.Status != ReportPending || len(queue.submitted) != 1 || queue.submitted[0].ReportID != sub.Report.ReportID {
+		t.Fatalf("pending report / queue = %+v / %+v", sub, queue.submitted)
 	}
-	stored, err := svc.GetReport(t.Context(), rep.ReportID)
+	if sub.ParentJobID != "job-1" {
+		t.Fatalf("parent_job_id = %q, want job-1", sub.ParentJobID)
+	}
+	stored, err := svc.GetReport(t.Context(), sub.Report.ReportID)
 	if err != nil || stored.Status != ReportPending || stored.Body != nil {
 		t.Fatalf("stored pending = %+v, err=%v", stored, err)
+	}
+	rec, err := svc.store.GetSensitivity(t.Context(), sub.Report.ReportID)
+	if err != nil || rec.ParentJobID != "job-1" || len(rec.Points) != 0 {
+		t.Fatalf("sensitivity row = %+v, err=%v", rec, err)
 	}
 }
 

@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-24
-verified-by: QT-43 施工 ②（PG Store 接线 + 启动迁移 + completed 不可变触发器）
+last-verified: 2026-10-25
+verified-by: W8 sensitivity 逐点回填（sensitivity_runs 加 parent_job_id；points 一次写满）
 ---
 
 # DB Schema — tellurion-analytics
@@ -19,13 +19,15 @@ verified-by: QT-43 施工 ②（PG Store 接线 + 启动迁移 + completed 不�
 |---|---|---|---|
 | `analysis.reports` | `report_id` | `run_id`、`analysis_type`（CHECK 六值）、`status`（CHECK pending/running/completed/failed）、`metrics_version`、`params_hash CHAR(64)`、`input_hash CHAR(64)`、`seed BIGINT`（可空）、`body JSONB`、`error TEXT DEFAULT ''`、`created_at` / `updated_at`；UNIQUE `NULLS NOT DISTINCT (run_id, analysis_type, params_hash, input_hash, seed, metrics_version)`；**CHECK `(status='completed') = (body IS NOT NULL)`**、**CHECK `status<>'failed' OR error<>''`**；`BEFORE UPDATE` 触发器 `reports_completed_immutable` 拒绝改 completed 行（SQLSTATE 55000） | PG 已接线 |
 | `analysis.benchmarks` | `(code, adjustment_basis, dataset_hash)` | `source TEXT DEFAULT ''`、`registered_at`；**只存引用，不存行情本体**（行情归 data）；新 `dataset_hash` = 新一行，不覆盖 | PG 已接线 |
-| `analysis.sensitivity_runs` | `report_id` → `analysis.reports` | `run_id`、`grid JSONB NOT NULL`、`points JSONB`（逐点结果，可空直到有结果） | DDL + PG 已就位；**写入方依赖 QT-44 的 X5b** |
+| `analysis.sensitivity_runs` | `report_id` → `analysis.reports` | `run_id`、`grid JSONB NOT NULL`、`points JSONB`（逐点结果，可空直到有结果）、`parent_job_id TEXT NOT NULL DEFAULT ''`（X5b 父作业，2026-10-25 加，`ALTER … ADD COLUMN IF NOT EXISTS`） | PG 已接线（提交落行 + 逐点回填已实现） |
 | `analysis.mc_runs` | `report_id` → `analysis.reports` | **`seed BIGINT NOT NULL`**、`n INTEGER CHECK (n>0)`、`method`（CHECK bootstrap/shuffle）、`input_hash CHAR(64)`、`summary JSONB NOT NULL` | PG 已接线（写入已实现） |
 | `analysis.attribution` | `report_id` → `analysis.reports` | `method`（CHECK brinson/factor）、`contributions JSONB NOT NULL`、**`residual DOUBLE PRECISION NOT NULL`**、`input_hash CHAR(64)` | PG 已接线（写入已实现） |
 
 另有 `reports_run_type_idx`（`run_id, analysis_type`）便于按 run 反查报告。
 
 **completed 不可变（双层）**：应用层 `PG.PutReport` 先判断（同键同内容 no-op、异内容 `ErrReportConflict`）；数据库层 `reports_completed_immutable` 触发器兜底——绕过应用层直接 `UPDATE` 也会被拒。理由与取舍见 [`adr/0002-报告不可变由PG触发器兜底.md`](adr/0002-报告不可变由PG触发器兜底.md)。`CHAR(64)` 列在读取侧用 `rtrim`，避免短值被空格填充污染。
+
+**sensitivity 的 points（2026-10-25）**：提交时只落 `grid` + `parent_job_id`（`points` 为 NULL）；父作业落定后由 `PG.PutSensitivity` 一次写满。写满后不可变（同内容 no-op、异内容 `ErrReportConflict`）。缺 point 时**不写 points**，报告落 `failed`——「半张网格」比没有更危险。
 
 **只读输入**：回测结果（`run` / 内核输出）、基准行情（数据服务）、因子值（数据服务）。**本仓不写它们的表。**
 

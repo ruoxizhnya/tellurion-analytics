@@ -91,6 +91,12 @@ var migrationStatements = []string{
 	`CREATE TRIGGER reports_completed_immutable
 		BEFORE UPDATE ON analysis.reports
 		FOR EACH ROW EXECUTE FUNCTION analysis.reports_completed_immutable()`,
+
+	// 父作业指针（X5b，QT-44）：敏感性网格提交给 orchestration 后，本仓要靠它
+	// 轮询汇总。用 ALTER 而不是改上面 CREATE TABLE 原文——迁移只前滚
+	// （docs/db-schema.md §4）。
+	`ALTER TABLE analysis.sensitivity_runs
+		ADD COLUMN IF NOT EXISTS parent_job_id TEXT NOT NULL DEFAULT ''`,
 }
 
 // Migrations 返回迁移语句的副本（调用方不能改到内部数组）。

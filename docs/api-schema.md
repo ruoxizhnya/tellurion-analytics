@@ -1,13 +1,13 @@
 ---
 status: active
 last-verified: 2026-10-25
-verified-by: W3 鉴权接线（kit net/http 适配 + 8 端点策略表；6 POST = trader / 2 GET = viewer）
+verified-by: W8 sensitivity 逐点回填（X5b 父作业端点 + 202 parent_job_id + 100 点上限）
 ---
 
 # API Schema — tellurion-analytics
 
-> **实现状态（2026-10-24）**：8 个端点全部在 `internal/httpapi` 落盘；计算面在 `internal/analysis`（纯函数）；**PG Store、启动迁移与三个上游读取适配器已接线**（`cmd/analyticsservice` 的 `-dsn` / `-core-url` / `-data-url` / `-artifact-url`，各自也可用同名 `ANALYTICS_*` 环境变量）。
-> **未配置的端口**仍 fail-closed 成 `503 dependency_unavailable`，**不伪造结果、不返回空报告**。sensitivity 的 job 队列（G7/X5b）仍未接，故该端点保持 503。可用性取决于部署配置（`docs/TASKS.md` QT-43 施工 ② 记录）。
+> **实现状态（2026-10-25）**：8 个端点全部在 `internal/httpapi` 落盘；计算面在 `internal/analysis`（纯函数）；**PG Store、启动迁移与四个上游适配器已接线**（`cmd/analyticsservice` 的 `-dsn` / `-core-url` / `-data-url` / `-artifact-url` / `-orchestration-url`，各自也可用同名 `ANALYTICS_*` 环境变量）。
+> **未配置的端口**仍 fail-closed 成 `503 dependency_unavailable`，**不伪造结果、不返回空报告**。sensitivity 的父作业队列（X5b / W6）已接：提交建 pending 报告，`GET /reports/{id}` 轮询父汇总并逐点回填。可用性取决于部署配置（`docs/TASKS.md` QT-43 施工 ② / W8 记录）。
 
 > **契约地位**：HTTP，**全部只读语义**（POST 表示"提交计算"，不改上游）。重计算走异步 job。
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
@@ -17,7 +17,7 @@ verified-by: W3 鉴权接线（kit net/http 适配 + 8 端点策略表；6 POST 
 > `kind=access` → 角色 any-of），策略表在本仓 `internal/httpapi/policy.go`；**全部端点**过闸且 fail-closed：
 > 未装配 Authorizer → 503，无凭证 / 坏 token → 401，越权 → 403。6 个 POST = trader，2 个 GET = viewer。
 > 无 secret + 回环 = 开放；无 secret + 非回环 = **拒绝启动**。现状登记见 §7。
-> **前置现状**：sensitivity 的 job 队列依赖 G7/X5b（`tellurion-orchestration` QT-44，**未落**，该端点 503）；结果读取走 R1 落地前的 interim 适配器（无 `status` 的异步结果 fail-closed）；基准走 X1b（已落）；holdings / 因子暴露走 interim artifact 面（R2 形状未冻结）。缺依赖即报错，不降级出假报告。
+> **前置现状**：sensitivity 的父作业队列走 G7/X5b（`tellurion-orchestration` QT-44，**W6 已落**）；结果读取走 R1 落地前的 interim 适配器（无 `status` 的异步结果 fail-closed）；基准走 X1b（已落）；holdings / 因子暴露走 interim artifact 面（R2 形状未冻结）。缺依赖即报错，不降级出假报告。
 
 ## 1. 接口面
 
@@ -26,13 +26,19 @@ verified-by: W3 鉴权接线（kit net/http 适配 + 8 端点策略表；6 POST 
 | POST | `/api/analysis/metrics` | `{run_id}` → 绩效指标全集（含收益类补齐） |
 | POST | `/api/analysis/benchmark` | `{run_id, benchmark_code}` → 超额 / IR / 跟踪误差 / 滚动对比 |
 | POST | `/api/analysis/attribution` | `{run_id, method: brinson\|factor}` → 归因表 |
-| POST | `/api/analysis/sensitivity` | `{run_id, param_grid}` → 敏感性矩阵（**异步 job**） |
+| POST | `/api/analysis/sensitivity` | `{run_id, param_grid}` → 202 `{report_id, status:"pending", parent_job_id}`（**异步 job**；父作业 = X5b） |
 | POST | `/api/analysis/montecarlo` | `{run_id, n, seed}` → 分布 / 置信区间（**异步 job**） |
 | POST | `/api/analysis/correlation` | `{run_ids[]}` → 相关性矩阵 |
 | GET | `/api/analysis/reports/{id}` | 报告（JSON / HTML） |
 | GET | `/api/analysis/reports/{id}/export?format=html\|csv` | 导出（**pdf 已裁为非目标**，见 `ARCHITECTURE.md` §9.7 R5） |
 
-**响应公共前缀**：所有**同步计算端点**（metrics / benchmark / attribution / correlation）与 `GET /reports/{id}` 的 2xx 报告体，都以 `{report_id, run_id, analysis_type, status}` 开头，随后才是各类型载荷。异步提交端点（sensitivity / montecarlo）只返回 `{report_id, status:"pending"}`，完整信封由 `GET /reports/{id}` 给出。
+**响应公共前缀**：所有**同步计算端点**（metrics / benchmark / attribution / correlation）与 `GET /reports/{id}` 的 2xx 报告体，都以 `{report_id, run_id, analysis_type, status}` 开头，随后才是各类型载荷。异步提交端点（sensitivity / montecarlo）只返回 `{report_id, status:"pending"}`；sensitivity 额外带 `parent_job_id`（X5b 父作业，2026-10-25 加，可缺省），完整信封由 `GET /reports/{id}` 给出。
+
+**sensitivity 的完成语义（2026-10-25，W8）**：
+- 提交成功只代表网格已交给父作业，报告 `pending`；`GET /reports/{id}` 会读一次父作业并推进（读路径轮询，无后台线程）。
+- 父作业落定后，`analysis.sensitivity_runs.points` 一次性写满，点顺序 = 网格展开顺序（参数名字典序、最后一维最快）；报告只有在**每个点都 completed** 时才 `completed`。
+- 任一点 `invalid` / `failed` ⇒ 报告 `failed`（`error` 逐点点名，points 仍完整落库）；**缺失的点不补齐**（父 total / 点数对不上 ⇒ `failed` 且不写 points）。
+- 上限 100 点（与 orchestration 的 `MaxBatchTasks` 同值），超限 `400 invalid_params`。
 
 **两处实现口径（契约已同步）**：
 
@@ -70,7 +76,8 @@ verified-by: W3 鉴权接线（kit net/http 适配 + 8 端点策略表；6 POST 
 - 计算类端点按 `(run_id, analysis_type, params_hash, input_hash, seed, metrics_version)` 派生**确定性** `report_id`：同键重复提交复用已有报告（字节一致），不重复计算。
 - `input_hash` 覆盖所有读取输入（结果体 / 基准 `dataset_hash` / holdings artifact / 因子数据集）：**输入换版 ⇒ 新报告**，不复用旧结论。
 - `params_hash` 是请求参数（基准代码 / 归因方法 / 网格 / n 等）的 canonical hash；不同参数 ⇒ 不同 `report_id`。
-- 异步 job 的提交返回 `{report_id, status:"pending"}`，轮询用 `GET /reports/{id}`；**作业态（pending/running/completed/failed）不是 K9 三值**，报告只在 completed 时存在。
+- 异步 job 的提交返回 `{report_id, status:"pending", parent_job_id?}`，轮询用 `GET /reports/{id}`；**作业态（pending/running/completed/failed）不是 K9 三值**，报告只在 completed 时存在。
+- sensitivity 的父作业幂等键 = `analysis-sensitivity:<report_id>`；orchestration 侧再按 `plan_hash` 去重，同网格重复提交只会有同一个父作业。`points` 只能从空写满一次（写满后不可变）。
 - `seed` 是 `*int64`：缺省 / `null` ⇒ `400 seed_required`；**`0` 是合法的显式种子**（可复现），不套用引擎「0 = time-based」语义（`ARCHITECTURE.md` §9.1 F6）。
 - `POST /correlation` **不返回部分矩阵**：任一 run 不可用（缺 / invalid / failed / 点数不足）即整体拒绝。
 - 归因报告里的 `residual` 是**独立字段**，不得摊进 `contributions`；它同时落 `analysis.attribution`（`db-schema.md` §1）。

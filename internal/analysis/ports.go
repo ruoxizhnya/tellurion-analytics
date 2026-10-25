@@ -49,10 +49,35 @@ type SensitivityJob struct {
 	Grid     []GridParam `json:"param_grid"`
 }
 
-// SensitivityQueue 是 X5 job 队列的消费端端口（本仓只提交，不跑回测循环）。
+// SensitivityChild 是父作业里一个点的结论（只读投影，顺序 = 计划顺序）。
+//
+// ResultStatus 是 K9 三值原样透传；空 = 尚未回报。
+type SensitivityChild struct {
+	RunID        string
+	Status       string
+	ResultStatus ResultStatus
+	Error        string
+}
+
+// SensitivityProgress 是父作业的进度快照（GET /api/runs/parents/{id} 的消费端投影）。
+//
+// Points 的顺序必须等于网格展开顺序（名称字典序，最后一维变化最快）——
+// 绑定由调用方用同一展开规则校验，不按 run_id 猜。
+type SensitivityProgress struct {
+	Status  string
+	Total   int
+	Settled int
+	Points  []SensitivityChild
+}
+
+// SensitivityQueue 是 X5 父作业队列的消费端端口（本仓只提交与汇总，不跑回测循环）。
+//
 // 未接线时服务必须 fail-closed（503 dependency_unavailable）。
+// Status 的失败语义：父作业不存在 → ErrSensitivityParentNotFound；
+// 网络 / 上游非 2xx → ErrDependencyUnavailable。
 type SensitivityQueue interface {
-	Submit(ctx context.Context, job SensitivityJob) (jobID string, err error)
+	Submit(ctx context.Context, job SensitivityJob) (parentJobID string, err error)
+	Status(ctx context.Context, parentJobID string) (SensitivityProgress, error)
 }
 
 // Executor 执行本仓内部的异步重计算（蒙特卡洛）。

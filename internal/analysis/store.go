@@ -19,6 +19,9 @@ type Store interface {
 	LatestBenchmark(ctx context.Context, code string) (BenchmarkRef, error)
 	PutAttribution(ctx context.Context, rec AttributionRecord) error
 	PutMonteCarlo(ctx context.Context, rec MonteCarloRecord) error
+	PutSensitivity(ctx context.Context, rec SensitivityRecord) error
+	// GetSensitivity 未知 report_id → ErrReportNotFound。
+	GetSensitivity(ctx context.Context, reportID string) (SensitivityRecord, error)
 }
 
 // Memory 是进程内 Store（测试与本地装配用，不作为生产持久化）。
@@ -28,6 +31,7 @@ type Memory struct {
 	benchmarks   []BenchmarkRef
 	attributions map[string]AttributionRecord
 	mcRuns       map[string]MonteCarloRecord
+	sensitivity  map[string]SensitivityRecord
 }
 
 // NewMemory 构造空的内存 Store。
@@ -36,6 +40,7 @@ func NewMemory() *Memory {
 		reports:      make(map[string]Report),
 		attributions: make(map[string]AttributionRecord),
 		mcRuns:       make(map[string]MonteCarloRecord),
+		sensitivity:  make(map[string]SensitivityRecord),
 	}
 }
 
@@ -133,4 +138,50 @@ func (m *Memory) PutMonteCarlo(_ context.Context, rec MonteCarloRecord) error {
 	rec.Summary = append([]byte(nil), rec.Summary...)
 	m.mcRuns[rec.ReportID] = rec
 	return nil
+}
+
+// PutSensitivity 落敏感性网格行：points 只能从「空」写满一次，之后不可变。
+func (m *Memory) PutSensitivity(_ context.Context, rec SensitivityRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	existing, ok := m.sensitivity[rec.ReportID]
+	if !ok {
+		rec.Grid = append([]byte(nil), rec.Grid...)
+		rec.Points = append([]byte(nil), rec.Points...)
+		m.sensitivity[rec.ReportID] = rec
+		return nil
+	}
+	if existing.RunID != rec.RunID || !bytes.Equal(existing.Grid, rec.Grid) {
+		return ErrReportConflict
+	}
+	if len(rec.Points) == 0 {
+		// 只允许同一父作业的重放；换父作业说明计划身份变了。
+		if existing.ParentJobID != rec.ParentJobID {
+			return ErrReportConflict
+		}
+		return nil
+	}
+	if len(existing.Points) > 0 {
+		if !bytes.Equal(existing.Points, rec.Points) || existing.ParentJobID != rec.ParentJobID {
+			return ErrReportConflict
+		}
+		return nil
+	}
+	existing.Points = append([]byte(nil), rec.Points...)
+	existing.ParentJobID = rec.ParentJobID
+	m.sensitivity[rec.ReportID] = existing
+	return nil
+}
+
+// GetSensitivity 读网格行。
+func (m *Memory) GetSensitivity(_ context.Context, reportID string) (SensitivityRecord, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	rec, ok := m.sensitivity[reportID]
+	if !ok {
+		return SensitivityRecord{}, ErrReportNotFound
+	}
+	rec.Grid = append([]byte(nil), rec.Grid...)
+	rec.Points = append([]byte(nil), rec.Points...)
+	return rec, nil
 }

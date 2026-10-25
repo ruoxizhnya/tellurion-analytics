@@ -179,3 +179,43 @@ type MonteCarloRecord struct {
 	Summary   json.RawMessage `json:"summary"`
 	CreatedAt time.Time       `json:"created_at"`
 }
+
+// SensitivityRecord 是 analysis.sensitivity_runs 的一行。
+//
+// ParentJobID 指向 orchestration 的父作业（X5b）；Points 在父作业落定前为 nil，
+// 落定后一次性写满（不写半张网格）。
+type SensitivityRecord struct {
+	ReportID    string          `json:"report_id"`
+	RunID       string          `json:"run_id"`
+	Grid        json.RawMessage `json:"grid"`
+	Points      json.RawMessage `json:"points,omitempty"`
+	ParentJobID string          `json:"parent_job_id"`
+	CreatedAt   time.Time       `json:"created_at"`
+}
+
+// SensitivityPoint 是网格里的一个点：参数、子 run、K9 结论与指标。
+//
+// Status 是 K9 三值原样透传；只有 completed 才带 Metrics。
+type SensitivityPoint struct {
+	Params  map[string]float64 `json:"params"`
+	RunID   string             `json:"run_id"`
+	Status  ResultStatus       `json:"status"`
+	Error   string             `json:"error,omitempty"`
+	Metrics *MetricsPayload    `json:"metrics,omitempty"`
+}
+
+// SensitivityCounts 是逐点结论的三值计数（invalid / failed 不折叠成 completed）。
+type SensitivityCounts struct {
+	Total     int `json:"total"`
+	Completed int `json:"completed"`
+	Invalid   int `json:"invalid"`
+	Failed    int `json:"failed"`
+}
+
+// SensitivityPayload 是敏感性报告体（completed 时才落库）。
+type SensitivityPayload struct {
+	ParentJobID string             `json:"parent_job_id"`
+	Grid        []GridParam        `json:"param_grid"`
+	Points      []SensitivityPoint `json:"points"`
+	Counts      SensitivityCounts  `json:"counts"`
+}

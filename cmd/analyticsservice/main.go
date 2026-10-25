@@ -4,8 +4,7 @@
 // 时）→ HTTP 面。未配置的端口保持 nil，对应端点 fail-closed 成
 // 503 dependency_unavailable —— 不伪造结果、不返回空报告。
 //
-// 未接线项（docs/TASKS.md QT-43 施工记录）：sensitivity 逐点回填（等 X5b）、
-// PDF 导出（R5 未裁）、鉴权（QT-50 ④）。
+// 未接线项（docs/TASKS.md QT-43 施工记录）：PDF 导出（R5 未裁）、鉴权（QT-50 ④）。
 package main
 
 import (
@@ -36,6 +35,8 @@ func main() {
 		"tellurion-data base URL for X1b datasets (empty = BenchmarkReader unwired → 503)")
 	artifactURL := flag.String("artifact-url", os.Getenv("ANALYTICS_ARTIFACT_URL"),
 		"artifact base URL for holdings / factor exposures (empty = providers unwired → 503)")
+	orchestrationURL := flag.String("orchestration-url", os.Getenv("ANALYTICS_ORCHESTRATION_URL"),
+		"orchestration base URL for X5b parent jobs (empty = SensitivityQueue unwired → 503)")
 	jwtSecret := flag.String("jwt-secret", envFirst("JWT_SECRET", "AUTH_JWT_SECRET"),
 		"JWT secret shared with analysis (empty = open access on loopback only)")
 	exposure := flag.String("insecure-exposure", os.Getenv("AUTH_INSECURE_EXPOSURE"),
@@ -82,8 +83,11 @@ func main() {
 		opts.Holdings = artifacts
 		opts.Factors = artifacts
 	}
-	log.Printf("analyticsservice: readers wired result=%t benchmark=%t holdings=%t factors=%t",
-		opts.Results != nil, opts.Benchmarks != nil, opts.Holdings != nil, opts.Factors != nil)
+	if *orchestrationURL != "" {
+		opts.Queue = upstream.NewSensitivityQueue(*orchestrationURL, nil)
+	}
+	log.Printf("analyticsservice: readers wired result=%t benchmark=%t holdings=%t factors=%t queue=%t",
+		opts.Results != nil, opts.Benchmarks != nil, opts.Holdings != nil, opts.Factors != nil, opts.Queue != nil)
 
 	svc, err := analysis.New(opts)
 	if err != nil {

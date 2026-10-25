@@ -20,6 +20,8 @@ var (
 	ErrSeedRequired             = errors.New("seed required")
 	ErrInvalidParams            = errors.New("invalid params")
 	ErrDependencyUnavailable    = errors.New("dependency unavailable")
+	// ErrSensitivityParentNotFound 是父作业不存在（终态失败，不是可重试的部署问题）。
+	ErrSensitivityParentNotFound = errors.New("sensitivity parent job not found")
 )
 
 // InvalidReasonsError 携带上游的 invalid_reasons（K9 原样透传）。

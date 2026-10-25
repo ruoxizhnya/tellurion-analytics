@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-25
-verified-by: W3 鉴权接线（kit net/http 适配 + 8 端点策略表 + 启动闸）
+verified-by: W8 sensitivity 逐点回填（X5b 父作业 HTTP 适配 + 真进程 E2E + fail-closed）
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -74,14 +74,14 @@ verified-by: W3 鉴权接线（kit net/http 适配 + 8 端点策略表 + 启动�
 
 **未落（如实登记，不算完成）**
 
-1. **sensitivity 逐点回填**：`SensitivityQueue` 仍只提交；`analysis.sensitivity_runs.points` 与完成态推进依赖 G7 的 X5b（`tellurion-orchestration` QT-44：X5b 未做）。按派发要求「不到就停」，本次不预设载荷形状。
+1. **sensitivity 逐点回填**：`SensitivityQueue` 仍只提交；`analysis.sensitivity_runs.points` 与完成态推进依赖 G7 的 X5b（`tellurion-orchestration` QT-44：等父端点/W6）。按派发要求「不到就停」，本次不预设载荷形状。（2026-10-25 W8 已结清，见下方施工记录）
 2. **R1 的 K9-correct 持久读面**：core 侧尚未落地；当前适配器对同步结果可用、对无 `status` 的异步结果 fail-closed。R1 落地后只换 URL/路径，端口与 DTO 不变。
 3. **R2 artifact 形状与 owner**：wire 形状仍是本地临时镜像，未迁 contracts。
 4. **PDF 导出**：**R5 已裁（2026-10-24）= 非目标**，只承诺 html / csv。
 5. **鉴权（裁-15，2026-10-25 已定，可开工）**：QT-50 ④ 的服务侧腿。口径：kit `v0.1.1` 的 net/http 适配（非 gin 中间件）；policy 表：6 个 `POST /api/analysis/*`（计算并落报告）= trader，`GET /api/analysis/reports/{id}` 与 `/export` = viewer；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。接线时把 `AuthStatus = "unwired"` 与 `TestAuthNotWiredCurrentState` 一并翻转成 401/403 断言，并加 route table ≡ policy table 守卫。
 6. **契约迁移**：`tellurion-contracts` 的 `analysis` 包未发布，本地 DTO 镜像未迁走。
 
-**验收现状**：⑤ 三条判据已在**真库 E2E** 层成立（不再是仅单测）；本单保持 🔶 —— sensitivity 逐点回填、R1/R2 契约化、鉴权仍未落（PDF 已裁为非目标），不写成已完成。
+**验收现状**：⑤ 三条判据已在**真库 E2E** 层成立（不再是仅单测）；本单保持 🔶 —— sensitivity 逐点回填、R1/R2 契约化、鉴权仍未落（PDF 已裁为非目标），不写成已完成。（其中 sensitivity 逐点回填已由 2026-10-25 W8 结清）
 
 #### 施工记录（2026-10-25，施工 ③：QT-43 收口——R1/R2 契约化 + 鉴权现状登记）
 
@@ -116,7 +116,7 @@ verified-by: W3 鉴权接线（kit net/http 适配 + 8 端点策略表 + 启动�
 
 1. **R1 的 K9-correct 持久读面**：核心在 core 侧（`ARCHITECTURE.md` §9.7 R1），本仓仍是 interim 适配器（读 core 现有 report 端点）。本次只是把**消费端形状与失败语义**冻结成 v1，不等于 R1 落地。
 2. **R2 artifact 的 owner 与最终形状**：本次冻结的是「本仓读它」的契约版本，owner 未定、**未迁 `tellurion-contracts`**（该仓 `analysis` 包未发布）。迁移时端口方法集与校验语义不变。
-3. **sensitivity 逐点回填**：`SensitivityQueue` 仍只提交，`analysis.sensitivity_runs.points` 与完成态推进依赖 QT-44（X5b 未做）。
+3. **sensitivity 逐点回填**：`SensitivityQueue` 仍只提交，`analysis.sensitivity_runs.points` 与完成态推进依赖 QT-44（等父端点/W6）。（2026-10-25 W8 已结清）
 4. **鉴权**：本次只做**现状登记**（常量 + 可执行锚点 + 文档），**未接线任何鉴权中间件**，不产出 401 / 403；安全边界仍是回环监听。
 5. **PDF**：非目标，不做。
 
@@ -144,9 +144,54 @@ verified-by: W3 鉴权接线（kit net/http 适配 + 8 端点策略表 + 启动�
 
 1. **R1 的 K9-correct 持久读面**：核心在 core 侧，本仓仍是 interim 适配器（见上一条施工记录）。
 2. **R2 artifact 的 owner 与最终形状**：owner 未定、未迁 `tellurion-contracts`。
-3. **sensitivity 逐点回填**：仍只提交，依赖 QT-44（X5b）。
+3. **sensitivity 逐点回填**：依赖 QT-44（等父端点/W6）。（2026-10-25 W8 已结清）
 4. **token 分发（跨仓）**：鉴权开启后 core / UI 调用本服务必须持 token（POST trader / GET viewer）；分发不在本仓。
 5. **PDF**：非目标，不做。
+
+#### 施工记录（2026-10-25，W8：sensitivity 逐点回填，X5b 父作业）
+
+**已落**
+
+1. **端口加轮询**：`analysis.SensitivityQueue` 从「只 Submit」扩成 `Submit + Status`；新增 `SensitivityChild` / `SensitivityProgress`（顺序 = 计划顺序）。`Status` 语义：父作业不存在 → `ErrSensitivityParentNotFound`（终态失败）；网络 / 非 2xx → `ErrDependencyUnavailable`（保持 pending，可重试）。
+2. **HTTP 适配器**：`internal/upstream/sensitivity.go` —— `POST /api/runs/parents`（`kind=batch`，`base_run_spec={"run_id":…}` 作为 interim 锚点，`grid` 为 name→values）；`GET /api/runs/parents/{id}` 读 `counts` + `summary.Tasks`（无 summary 时回落 `children`）。幂等键 `analysis-sensitivity:<report_id>`，父身份仍由 orchestration 的 `plan_hash` 兜底。
+3. **逐点回填**：`internal/analysis/sensitivity.go`
+   - 提交后落 `analysis.sensitivity_runs`（`grid` + `parent_job_id`，`points` 为 NULL）；报告仍 `pending`。
+   - **读路径推进**：`GET /reports/{id}` 对 pending/running 的 sensitivity 报告查一次父作业；父作业 `completed`/`failed` 时回填。无后台 goroutine，进程重启不丢进度、重复读取幂等。
+   - 点顺序用本地笛卡尔展开（参数名字典序、最后一维最快，与 `plan.ExpandBatch` 同规则），再与父汇总顺序对齐。
+4. **fail-closed（缺 point 不补齐、不猜形状）**
+   - 父 `total` ≠ 本地展开点数、或返回点数 < 计划 ⇒ 报告 `failed`，**不写 points**（错误点名「refusing to synthesize」）。
+   - 某个点没有 K9 `result_status` ⇒ 失败并点名该点，不写 points。
+   - 任一点 `invalid` / `failed` / 结果取不到 ⇒ 写满逐点结论（含逐点 error）但报告 `failed`，不出「看起来完整」的网格。
+   - 结果读取端口未接线 ⇒ `503 dependency_unavailable`（不把部署问题写成业务失败）。
+5. **DDL / Store**：`analysis.sensitivity_runs` 新增 `parent_job_id TEXT NOT NULL DEFAULT ''`（`ALTER … ADD COLUMN IF NOT EXISTS`，只前滚）；`Store` 加 `PutSensitivity` / `GetSensitivity`，Memory 与 PG 同语义（points 只能从 NULL 写满一次，之后不可变）。
+6. **HTTP**：`POST /api/analysis/sensitivity` 的 202 增加可选 `parent_job_id`（montecarlo 不带）；网格展开上限 100 点，超限 400 `invalid_params`（与 orchestration 的 `MaxBatchTasks` 同值）。
+7. **装配**：`cmd/analyticsservice` 新增 `-orchestration-url` / `ANALYTICS_ORCHESTRATION_URL`；未配置仍 503。
+
+**E2E（真进程 + 真库）**
+
+- `TestSensitivityEndToEndWithOrchestrationProcess`：`go build` 真 orchestration 进程 + PG 16（WSL）→ 提交 → 父作业 pending → 报告 pending → 执行侧写回汇总（**唯一模拟环节**：worker 尚未落地，用 SQL 写 `run.parent_jobs` 的 `status/completed/summary_json`）→ 报告 completed、逐点回填、参数顺序正确。**PASS**。
+- `TestSensitivityEndToEndWithFakeParent`：恒常运行的契约级 E2E（严格按 W6 wire）。
+- `TestEndToEndWithPostgres` / `TestPGSensitivityBackfill`：真库下落库与回填不可变。**PASS**。
+
+**破坏验证**
+
+- 改坏：`expandGrid` 的参数排序由字典序改成逆序（`sort.Reverse`）。
+- 应红：`TestExpandGridOrderAndCap`（`point 1 = a=2,b=10, want a=1,b=20`）与 `TestServiceSensitivityBackfillsPoints`（`point 1 params = fee=0.02,lookback=10`）。
+- 还原：备份逐字节拷回，`sensitivity.go` SHA-256 改前 / 还原后同为 `3D4874C6D3F9AA68E41675862EC10A5E5CC60785C3799360A21CB465FF51F711`。
+- 应绿：同两条用例复跑 `ok`。
+
+**门禁（真实输出）**
+
+- Windows（无 DSN，PG / 真进程腿按设计 skip）：`go build ./...` / `go vet ./...` exit 0；`go test ./... -count=1` → `ok internal/analysis 0.064s`、`ok internal/httpapi 0.079s`、`ok internal/upstream 0.064s`。
+- WSL（Go 1.25.0 + PG 16.15，`ANALYTICS_TEST_DSN` / `ORCHESTRATION_TEST_DSN` 均设置）：同一组命令全绿；`-run 'TestSensitivityEndToEndWithOrchestrationProcess|TestPGSensitivityBackfill|TestEndToEndWithPostgres' -v` → 三条全 `PASS`（真 orchestration 进程 0.74s）。
+- 说明：本机 Windows 进程对 WSL 转发端口的连接受限（PowerShell 可连、Go 被拒），故真库腿在 WSL 内执行；不是代码问题。
+
+**未落（如实）**
+
+1. **执行侧（worker）仍未落地**：父汇总由执行侧调用 `parents.ApplyBatchSummary` 产生；本仓只读。W8 的真进程 E2E 用 SQL 模拟该写回，**不代表 worker 已存在**。
+2. **`base_run_spec` 只有 `run_id`**：完整 RunSpec 的装配属执行侧（R3 未裁），当前锚点只保证计划身份可算、网格可展开。
+3. **失败报告的逐点 error 只在 `error` 文本 + `analysis.sensitivity_runs.points`**：报告体仍遵守「completed 才有 body」的 DDL 约束，API 不单独暴露 failed 报告的 points。
+4. R1 持久读面、R2 owner / contracts 迁移、token 分发仍按上一条记录未落。
 
 ---
 

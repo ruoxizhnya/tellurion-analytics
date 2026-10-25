@@ -65,13 +65,13 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 ## 8. 分期与状态
 
-> 更新（2026-10-24，QT-43 施工 ②）：PG Store、启动迁移与三个上游读取适配器已接线；未配置上游 URL 的端口仍 fail-closed（503）。sensitivity 的**逐点回填**仍等 X5b。详见 §9.8。
+> 更新（2026-10-25，W8）：PG Store、启动迁移与**四个**上游适配器（结果 / X1b 基准 / artifact / X5b 父作业）已接线；未配置上游 URL 的端口仍 fail-closed（503）。sensitivity 的**逐点回填**已落（提交父作业 → 读路径轮询 → points）。详见 §9.8。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | X4a | metrics + benchmark（同步） | 🔶 代码 + PG Store 已落；`ResultReader` / `BenchmarkReader` 已接（`-core-url` / `-data-url`），未配置仍 503 |
 | X4b | attribution（Brinson / 因子） | 🔶 代码已落；`HoldingsProvider` / `FactorExposureProvider` 已接 interim artifact 面（`-artifact-url`），R2 形状未冻结 |
-| X4c | sensitivity + montecarlo（异步 + seed） | 🔶 montecarlo 端到端可用（PG 持久化）；sensitivity 提交端就绪、X5b 队列未落地（503） |
+| X4c | sensitivity + montecarlo（异步 + seed） | 🔶 montecarlo 端到端可用（PG 持久化）；sensitivity 已接 X5b（提交 + 逐点回填，W8），执行侧 worker 未落 |
 | X4d | 报告导出（html / csv；**pdf 已裁为非目标**，§9.7 R5） | 🔶 html / csv 可用且确定性；pdf 不做 |
 
 ## 9. 接口对表（M8 前置 · ✅ 2026-10-22）
@@ -132,7 +132,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 | `POST /api/analysis/metrics` | `{run_id}` → `200 {report_id, run_id, analysis_type:"metrics", status:"completed", metrics_version, from_result:{...}, computed:{volatility, var_95, cvar_95}, sources}` | `404 run_not_found`；`409 run_result_invalid`（带 `invalid_reasons`）/ `409 run_result_failed` / `409 run_result_incomplete`；`400 invalid_params`；`503 dependency_unavailable`（部署未配置 `-core-url`） | `report_id = hash(run_id, "metrics", params_hash, input_hash, seed, metrics_version)`；`input_hash` = 结果体 hash（同 `run_id` 结果变了 ⇒ 新报告，不复用旧报告）；同键返回已存报告（字节一致）。同步。**`beta` 不在 metrics 报告里**——它需要基准序列，归 `benchmark`（metrics 无基准入参，硬塞会造出无来源的值） |
 | `POST /api/analysis/benchmark` | `{run_id, benchmark_code, window?}` → `200 {report_id, benchmark:{code, adjustment_basis, dataset_hash}, excess_return, tracking_error, information_ratio, beta, rolling:{window, series}}` | 上列 + `404 benchmark_not_registered`；`409 benchmark_data_unavailable`（含口径不一致）；`503 dependency_unavailable` | 幂等键含 `benchmark_code` + `window` + 基准 `dataset_hash`（基准数据换版 ⇒ 新报告）；同步。`window` 缺省 20，负数 ⇒ 400 |
 | `POST /api/analysis/attribution` | `{run_id, method:"brinson"\|"factor"}` → `200 {report_id, method, contributions:[...], residual, total_return, benchmark_return?}` | `400 method_not_supported`；`409 run_result_incomplete`（缺 holdings / 因子暴露时**点名缺哪个**）；`404 run_not_found`；`409 run_result_invalid` / `run_result_failed`；`503 dependency_unavailable`（部署未配置 `-artifact-url`） | 同步；**不变量**：factor 的 `Σcontributions + residual == total_return`、Brinson 的 `allocation + selection + interaction == portfolio_return - benchmark_return`，容差 `1e-8`；residual **不得**摊进因子贡献，且落 `analysis.attribution`。R2 未裁前按 §9.8 的**临时 artifact 形状**实现（provider 端口不变） |
-| `POST /api/analysis/sensitivity` | `{run_id, param_grid:[{name, values[]}]}` → `202 {report_id, status:"pending"}`；队列未接线 → `503 dependency_unavailable` | `400 invalid_params`（空网格 / 空 name / 空 values / 重名）；`404 run_not_found`；`409 run_result_invalid/failed/incomplete`；`503` | `report_id` 由 `(run_id, grid_canonical_hash)` 派生；同键复用。**异步**；依赖 X5 job 队列（R3），本仓**只提交不执行** |
+| `POST /api/analysis/sensitivity` | `{run_id, param_grid:[{name, values[]}]}` → `202 {report_id, status:"pending", parent_job_id?}`；队列未接线 → `503 dependency_unavailable` | `400 invalid_params`（空网格 / 空 name / 空 values / 重名 / >100 点）；`404 run_not_found`；`409 run_result_invalid/failed/incomplete`；`503` | `report_id` 由 `(run_id, grid_canonical_hash)` 派生；同键复用。**异步**；网格作为 batch 父作业提交给 X5b（W6），`GET /reports/{id}` 轮询 `GET /api/runs/parents/{id}` 并按计划顺序回填 `analysis.sensitivity_runs.points`；本仓**只提交与汇总、不执行** |
 | `POST /api/analysis/montecarlo` | `{run_id, n, seed, method?:"bootstrap"\|"shuffle"}` → `202 {report_id, status:"pending"}` | `400 seed_required`（缺省 / null）；`400 invalid_params`（`n<=0`、`n>10000`、未知 method）；`404 run_not_found`；`409 run_result_invalid/failed/incomplete` | 幂等键含 `n` + `seed` + `method`；同键同报告；**本仓异步执行**（`Executor`），pending → completed/failed |
 | `POST /api/analysis/correlation` | `{run_ids:[...]}` → `200 {report_id, strategies:[...], correlations:[[...]]}` | `400 invalid_params`（2..8 个去重后 ID）；`404 run_not_found`（点名 ID）；`409 run_result_invalid/failed`（任一 run 不可分析）；`409 run_result_incomplete`（<30 点） | **不返回部分矩阵**：任一 run 不可用即整体拒绝（与 compare 的「部分视图」不同，矩阵少一行会误导）。同步 |
 | `GET /api/analysis/reports/{id}` | → `200 {report_id, run_id, analysis_type, status, report?, error?}` | `404 report_not_found` | 轮询端点：pending / running 也是 200（status 说明），只有 completed 才带 `report`；只读可重试 |
@@ -144,7 +144,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 |---|---|---|---|
 | `analysis.reports` | PK `report_id`；UNIQUE `(run_id, analysis_type, params_hash, input_hash, seed, metrics_version)` | 只有 completed 才落报告体；**报告一旦 completed 不可变**；`input_hash` 覆盖所有读取输入（结果体 / 基准 dataset_hash / holdings artifact / 因子数据集） | 同键重复提交返回已存报告（字节一致）；同键不同内容 = fail-loud；体积上限按 `db-schema.md` §5。注意：`seed` 可空时 PG 唯一键**默认不拦 NULL 重复**：建表用 `NULLS NOT DISTINCT`（PG15+）或 0 哨兵 |
 | `analysis.benchmarks` | PK `(code, adjustment_basis, dataset_hash)` | 只登记引用（不存行情本体，行情归 data） | 同键同 hash = no-op；同 code + basis 的新 dataset_hash = **新一行**（历史可查，不覆盖）；「当前」按 `registered_at` 取最新 |
-| `analysis.sensitivity_runs` | PK `report_id`；子 run_id 列表 | 网格 + 每个点的 `run_id` + 指标；⛔ 依赖 X5 | 同 `(run_id, grid_hash, input_hash)` 复用；部分点失败 ⇒ 报告 status=failed + 逐点 error，不出「半张网格」 |
+| `analysis.sensitivity_runs` | PK `report_id`；`parent_job_id` 指向 X5b 父作业 | 网格 + 每个点的 `run_id` + 指标；父作业统一下发（W6） | 提交即落行（`grid` + `parent_job_id`，`points` NULL）；父作业落定后**一次写满** `points`，写满后不可变；缺 point ⇒ 报告 failed 且不写 points（不出「半张网格」） |
 | `analysis.mc_runs` | PK `report_id` | `seed NOT NULL`、`n`、`method`、`input_hash`、结果摘要 | 同 `(run_id, n, seed, method, input_hash)` 复用；seed 缺失 = 拒写（`seed_required`） |
 | `analysis.attribution` | PK `report_id` | `method`、`contributions`、`residual`、输入 hash（holdings artifact / factor dataset） | 同键复用；residual 必须落库（不许只在响应里出现） |
 | 上游表 | — | **只读**，禁止写入、禁止 join | 跨 schema 取数只走只读 API / 视图（`db-schema.md` §2/§4） |
@@ -164,7 +164,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 |---|---|---|---|
 | R1 | **K9-correct 的结果读取面**（F1） | 异步 invalid 落 failed 且丢结果；同步/异步两种编码。**本仓已接 interim 适配器**：`internal/upstream.ResultReader` 读 core 现有 `GET /api/backtest/{id}/report`，有 `status` 才映射三值；无 `status`（异步结果）⇒ `409 run_result_incomplete`，解析错误串的路径**零实现**。消费端形状与失败语义已冻结为 **`UpstreamContractVersion=v1`**（`api-schema.md` §6.1） | 建议二选一：(a) core job 层把 invalid 落成 `status=invalid` + 保留结果体（改 OBS-01 的落库口径）；(b) `run`/artifact 读取面（QT-44 / QT-63）提供 K9-correct 读取。R1 落地后只换适配器的 URL/路径，端口与 DTO 不变 |
 | R2 | **holdings / 因子暴露 artifact**（F2） | 结果 DTO 无逐标的持仓；`BacktestState` 只在内存。**本仓已按临时形状接 interim artifact 适配器**：`PortfolioSnapshot{holdings, benchmark_sector_weights, benchmark_sector_returns}`、`FactorExposures{factors[], dataset_hash}`（`internal/analysis/model.go`），HTTP 面 `GET /runs/{id}/portfolio-snapshot` / `/factor-exposures`；未配置即 503。消费端形状已冻结为 **`UpstreamContractVersion=v1`**（`api-schema.md` §6.2：`dataset_hash` 与行业权重 / 收益必填） | 定 artifact 形状与 owner（core 产、本仓读）后，把这两个临时 DTO 迁到 `tellurion-contracts` 的 analysis 包；**端口方法集不变**，形状变更走契约流程 |
-| R3 | **sensitivity 的 job 队列**（F3） | QT-44 的 X5b 未落（`tellurion-orchestration` 施工记录：X5a/X5c 已落，batch/walkforward 未做）；本仓 `SensitivityQueue.Submit(report_id, run_id, grid)` 端口已就位，队列 nil ⇒ 503 | X4c 开工前拍；本仓只做提交与汇总，不做回测循环。逐点结果回填（`analysis.sensitivity_runs.points`）随 QT-44 的 `Complete` 载荷落地 |
+| R3 | **sensitivity 的 job 队列**（F3） | **已落（2026-10-25，W8）**：orchestration 的 X5b 父端点（W6）已接；本仓 `SensitivityQueue` = `Submit` + `Status`，`analysis.sensitivity_runs.points` 按父汇总逐点回填；未配置 `-orchestration-url` 仍 503 | 执行侧（worker）与完整 RunSpec 的装配仍不在本仓：`base_run_spec` 目前只带 `run_id` 锚点，worker 落地后如需完整 spec 由执行侧解析（契约变更走 R3 重裁） |
 | R4 | **基准数据面与口径**（F4） | **X1b 已落**（`tellurion-data` `/datasets/resolve` + `/datasets/{hash}`）；本仓 `BenchmarkReader` 已接 X1b，按登记的 `adjustment_basis` 取数，basis 不一致即 409 | 保持 `adjustment_basis` 在登记身份里；若将来改走别的数据面，只换适配器 |
 | R5 | **PDF 导出** | **已裁（2026-10-24）= 非目标**：core 现状只有 html（用浏览器打印），无渲染器 | 从目标面移除；只承诺 html / csv（`api-schema.md` §1 / §4）。不引入渲染器、不立 ADR |
 | R6 | **鉴权角色矩阵** | **已裁（2026-10-25）**：6 个 POST = trader、2 个 GET = viewer；机制在 kit `auth/httpadapter`，策略表在本仓 `internal/httpapi/policy.go`（ADR-0003） | 全端点 fail-closed；无 secret + 非回环拒绝启动 |
@@ -180,6 +180,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 | `internal/analysis/model.go` | 本地 DTO 镜像（`BacktestResponse` / `BenchmarkSeries` / `PortfolioSnapshot` / `FactorExposures`）+ `Report` / `AttributionRecord` / `MonteCarloRecord` |
 | `internal/analysis/ports.go` | 5 个消费端端口：`ResultReader` / `BenchmarkReader` / `HoldingsProvider` / `FactorExposureProvider` / `SensitivityQueue`；`Executor`（Inline / Async） |
 | `internal/analysis/{metrics,benchmark,attribution,montecarlo,correlation,stats}.go` | 六类纯函数计算；口径与 core 同式（Pearson / 截断最短 / 对角 1.0 / Brinson 三分解） |
+| `internal/analysis/sensitivity.go` | 网格展开（≤100 点，与 `plan.ExpandBatch` 同序）、父作业进度推进、逐点回填与 fail-closed |
 | `internal/analysis/report.go` | `report_id` 派生（域标签 `tellurion.analysis_report_id.v1` + 长度前缀哈希）、`hashInputs` |
 | `internal/analysis/store.go` | `Store` 端口 + `Memory` 实现（单锁、出库深拷贝、`completed` 不可变、同键不同内容 `ErrReportConflict`） |
 | `internal/analysis/pgstore.go` | **PG 实现**：`OpenPG` / `PG.Migrate`（单事务按序执行 `Migrations()`）/ `Store` 五方法；completed 同键同内容 no-op、异内容 `ErrReportConflict`；`CHAR(64)` 读取 `rtrim` |
@@ -187,8 +188,9 @@ tellurion-analytics ──(只读)──► core / run（结果）
 | `internal/analysis/export.go` | 确定性 html / csv 渲染（不读时钟、不读随机） |
 | `internal/analysis/service.go` | 门面：读上游 → 纯函数 → 落 `analysis.*`；未接线端口 ⇒ `ErrDependencyUnavailable` |
 | `internal/upstream/upstream.go` | **上游 HTTP 适配器**：`ResultReader`（core `/api/backtest/{id}/report`，interim）、`BenchmarkReader`（X1b resolve + snapshot）、`ArtifactReader`（holdings / 因子暴露，interim） |
+| `internal/upstream/sensitivity.go` | **X5b 父作业适配器**：`POST /api/runs/parents`（batch，`base_run_spec={"run_id":…}` 锚点）+ `GET /api/runs/parents/{id}`（`summary.Tasks` 优先，回落 `children`） |
 | `internal/httpapi/api.go` | 8 端点（Go 1.22 mux pattern）、严格 JSON 解码（拒未知字段 / 拒尾随 / 1 MiB 上限）、13 词错误码映射 |
-| `cmd/analyticsservice/main.go` | 进程入口：`-dsn`（PG + 启动迁移）/ `-core-url` / `-data-url` / `-artifact-url`；未给 DSN 时 Memory（dev）；Async Executor；回环 `127.0.0.1:8087` |
+| `cmd/analyticsservice/main.go` | 进程入口：`-dsn`（PG + 启动迁移）/ `-core-url` / `-data-url` / `-artifact-url` / `-orchestration-url`；未给 DSN 时 Memory（dev）；Async Executor；回环 `127.0.0.1:8087` |
 
 **端到端可用性**（「已接」= 给了对应 URL 即通；未给仍 503）
 
@@ -198,7 +200,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 | benchmark | ✅ | `ResultReader` + `BenchmarkReader`（X1b）已接 | 已接 |
 | attribution (brinson) | ✅（临时形状） | `ResultReader` + `HoldingsProvider`（interim artifact）已接 | 已接 |
 | attribution (factor) | ✅（临时形状） | `ResultReader` + `FactorExposureProvider`（interim artifact）已接 | 已接 |
-| sensitivity | ✅（仅提交） | `ResultReader` 已接；`SensitivityQueue` 未接（X5b） | 提交仍 503 |
+| sensitivity | ✅ | `ResultReader` + `SensitivityQueue`（X5b）已接 | 已接（提交 + 逐点回填；执行侧 worker 未落） |
 | montecarlo | ✅ | `ResultReader` 已接；**其余本仓自足** | 已接（PG 持久化） |
 | correlation | ✅ | `ResultReader` 已接 | 已接 |
 | GET report / export | ✅ | 无 | **可用**（需先有报告） |
@@ -209,8 +211,8 @@ tellurion-analytics ──(只读)──► core / run（结果）
 2. **PG 是生产 Store，Memory 只做测试 / 无库本地装配**：启动时给了 DSN 就连接 + 迁移；空 DSN 会打 WARNING。`completed` 不可变由应用层 + DB 触发器双保险（ADR-0002）。
 3. **R1 未落 ⇒ ResultReader 是 interim**：读 core 现有 report 端点，有 `status` 才映射三值；无 `status` 的异步结果 fail-closed，**不解析错误串**。
 4. **R2 未裁 ⇒ artifact 形状是临时的**：`GET /runs/{id}/portfolio-snapshot` / `/factor-exposures` 是 interim wire 形状；owner 与最终形状定了再迁 contracts，端口不变。
-5. **不落 `analysis.sensitivity_runs.points`**：逐点结果字段依赖 G7/X5b 的 `Complete` 载荷（R3），不预先编形状。
+5. **sensitivity 的 points 由父汇总驱动（2026-10-25）**：`base_run_spec` 只带 `run_id` 锚点，网格交给 X5b；`points` 只能从 NULL 一次写满，缺 point 就整份失败（不补、不猜）。执行侧（worker）与完整 RunSpec 装配不在本仓。
 6. **鉴权已接线（2026-10-25）**：kit `auth/httpadapter` + 本仓策略表，全端点 401/403/503 fail-closed（ADR-0003）。
 7. **`Migrations()` 只返回副本**，没有「按版本号执行 / 回滚」——与 core / risk 同一取向（`docs/db-schema.md` §4）。
 
-**自检（2026-10-24）**：`gofmt -l .` 无输出；`go build ./...`、`go vet ./...`、`go test ./... -count=1` 全绿。带真库：`ANALYTICS_TEST_DSN='postgres://postgres:postgres@127.0.0.1:5432/tellurion_analytics_test?sslmode=disable' go test ./... -count=1` 全绿（PG 17.5）。测试覆盖：三值 fail-closed、`seed` 规则（nil / 0 / 上界）、同 seed 字节一致、`report_id` 各键敏感性、`completed` 不可变（含触发器直连）、Brinson / 因子恒等式（`1e-8`）、相关性 30 点边界与对角 1.0、导出确定性、13 个 wire code 与 503、PG 迁移幂等与真库 E2E。
+**自检（2026-10-25，W8）**：`gofmt -l .` 无输出；`go build ./...`、`go vet ./...`、`go test ./... -count=1` 全绿。带真库 + 真进程：PG 16.15（WSL）上 `ANALYTICS_TEST_DSN` / `ORCHESTRATION_TEST_DSN` 同时设置，`TestSensitivityEndToEndWithOrchestrationProcess` / `TestEndToEndWithPostgres` / `TestPGSensitivityBackfill` 全 `PASS`。测试覆盖：三值 fail-closed、`seed` 规则（nil / 0 / 上界）、同 seed 字节一致、`report_id` 各键敏感性、`completed` 不可变（含触发器直连）、Brinson / 因子恒等式（`1e-8`）、相关性 30 点边界与对角 1.0、导出确定性、13 个 wire code 与 503、PG 迁移幂等与真库 E2E、sensitivity 网格顺序 / 缺 point fail-closed / points 一次写满。

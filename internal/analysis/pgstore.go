@@ -285,3 +285,95 @@ func jsonParam(raw json.RawMessage) any {
 	}
 	return string(raw)
 }
+
+// PutSensitivity 落敏感性网格行：points 只能从「空」写满一次，之后不可变。
+func (p *PG) PutSensitivity(ctx context.Context, rec SensitivityRecord) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("analysis: begin put sensitivity %s: %w", rec.ReportID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx,
+		`INSERT INTO analysis.sensitivity_runs
+			(report_id, run_id, grid, points, parent_job_id, created_at)
+		 VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6)
+		 ON CONFLICT (report_id) DO NOTHING`,
+		rec.ReportID, rec.RunID, jsonParam(rec.Grid), jsonParam(rec.Points),
+		rec.ParentJobID, rec.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("analysis: insert sensitivity %s: %w", rec.ReportID, err)
+	}
+	if tag.RowsAffected() == 1 {
+		return tx.Commit(ctx)
+	}
+
+	var (
+		runID     string
+		sameGrid  bool
+		pointsNil bool
+		samePts   bool
+		parentID  string
+	)
+	err = tx.QueryRow(ctx,
+		`SELECT run_id, (grid = $2::jsonb), (points IS NULL),
+		        (points IS NOT DISTINCT FROM $3::jsonb), parent_job_id
+		   FROM analysis.sensitivity_runs
+		  WHERE report_id = $1
+		  FOR UPDATE`,
+		rec.ReportID, jsonParam(rec.Grid), jsonParam(rec.Points)).
+		Scan(&runID, &sameGrid, &pointsNil, &samePts, &parentID)
+	if err != nil {
+		return fmt.Errorf("analysis: lock sensitivity %s: %w", rec.ReportID, err)
+	}
+	if runID != rec.RunID || !sameGrid {
+		return ErrReportConflict
+	}
+	if len(rec.Points) == 0 {
+		// 只允许同一父作业的重放；换父作业说明计划身份变了。
+		if parentID != rec.ParentJobID {
+			return ErrReportConflict
+		}
+		return tx.Commit(ctx)
+	}
+	if !pointsNil {
+		if !samePts || parentID != rec.ParentJobID {
+			return ErrReportConflict
+		}
+		return tx.Commit(ctx)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE analysis.sensitivity_runs
+		    SET points = $2::jsonb, parent_job_id = $3
+		  WHERE report_id = $1`,
+		rec.ReportID, jsonParam(rec.Points), rec.ParentJobID); err != nil {
+		return fmt.Errorf("analysis: backfill sensitivity %s: %w", rec.ReportID, err)
+	}
+	return tx.Commit(ctx)
+}
+
+// GetSensitivity 读网格行。
+func (p *PG) GetSensitivity(ctx context.Context, reportID string) (SensitivityRecord, error) {
+	var (
+		rec  SensitivityRecord
+		grid []byte
+		pts  []byte
+	)
+	err := p.pool.QueryRow(ctx,
+		`SELECT report_id, run_id, grid, points, parent_job_id, created_at
+		   FROM analysis.sensitivity_runs WHERE report_id = $1`, reportID).
+		Scan(&rec.ReportID, &rec.RunID, &grid, &pts, &rec.ParentJobID, &rec.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SensitivityRecord{}, ErrReportNotFound
+	}
+	if err != nil {
+		return SensitivityRecord{}, fmt.Errorf("analysis: get sensitivity %s: %w", reportID, err)
+	}
+	if len(grid) > 0 {
+		rec.Grid = json.RawMessage(grid)
+	}
+	if len(pts) > 0 {
+		rec.Points = json.RawMessage(pts)
+	}
+	return rec, nil
+}
