@@ -51,11 +51,11 @@ go test ./...
 
 | 依赖 | 版本 | 说明 |
 |---|---|---|
-| `github.com/ruoxizhnya/tellurion-contracts` | 未引入（最新 `v0.3.0`，2026-10-23 发版；仍无 `analysis` 包） | 契约仓的 `analysis` 包未发布；本仓暂以 `internal/analysis/model.go` 的本地 DTO 镜像冻结形状（只消费、不输出） |
+| `github.com/ruoxizhnya/tellurion-contracts` | 未引入（远端最新 `v0.6.0`，2026-10-24 发版；实测 `v0.6.0` 与 `origin/main` 均无 `analysis` 包，2026-10-25） | 契约仓的 `analysis` 包未发布；本仓暂以 `internal/analysis/model.go` 的本地 DTO 镜像冻结形状（只消费、不输出） |
 | `github.com/ruoxizhnya/tellurion-kit` | `v0.1.1` | 鉴权机制：`auth`（token 解析）+ `auth/httpadapter`（net/http 适配、启动闸、Policy）。本仓只写策略表，不另造 token 校验 |
 | `github.com/jackc/pgx/v5` | `v5.11.0` | `analysis.*` 的 PG 连接池与迁移执行（`internal/analysis/pgstore.go`）；选 pgx 而非 `database/sql` 驱动是为了直接拿 `pgxpool` 与 `pgtype` 的 NULL 语义 |
 
-> `go.mod` 现在只有上面这一条直接依赖（2026-10-24，施工 ②）。契约发布后按 `docs/ARCHITECTURE.md` §9.8 迁走本地镜像。
+> `go.mod` 现在有两条直接依赖：`pgx v5.11.0`（2026-10-24，施工 ②）与 `tellurion-kit v0.1.1`（2026-10-25，W3 鉴权接线）。契约发布后按 `docs/ARCHITECTURE.md` §9.8 迁走本地镜像。
 
 > 跨仓依赖**只认版本号**（伪版本或 tag），不认源码路径。契约变更走 `tellurion-contracts` 的发布，不走"顺手改一下"。
 

@@ -50,7 +50,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
         └──(只读)──► tellurion-data（基准、因子值）
 ```
 
-**今日实况（2026-10-24）**：`go.mod` 只有一条直接依赖 `github.com/jackc/pgx/v5`（PG Store 与迁移执行）——契约仓的 `analysis` 包尚未发布，本仓仍以 `internal/analysis/model.go` 的本地 DTO 镜像冻结消费形状（§9.8）。这是**临时**的：镜像只在消费端出现，不向其他仓输出；契约发布后按 §9.8 迁走。
+**今日实况（2026-10-25）**：`go.mod` 的直接依赖两条——`github.com/jackc/pgx/v5 v5.11.0`（PG Store 与迁移执行）与 `github.com/ruoxizhnya/tellurion-kit v0.1.1`（鉴权机制，2026-10-25 W3）；**内部仓只有 kit 这一条**。契约仓的 `analysis` 包尚未发布（实测远端最新 `v0.6.0` 里没有它），本仓仍以 `internal/analysis/model.go` 的本地 DTO 镜像冻结消费形状（§9.8）。这是**临时**的：镜像只在消费端出现，不向其他仓输出；契约发布后按 §9.8 迁走。
 
 ## 6. 关键决策
 
@@ -207,7 +207,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 **故意取舍（不是遗漏）**
 
-1. **只有一条跨仓依赖**：`go.mod` 仅 `github.com/jackc/pgx/v5`。契约仓的 `analysis` 包尚未发布，仍以本地 DTO 镜像冻结形状；镜像**只在消费端使用**，不违反「只认版本号」。
+1. **内部仓依赖只有 kit 一条**：`go.mod` 的直接依赖是 `pgx v5.11.0`（第三方驱动）+ `tellurion-kit v0.1.1`（鉴权机制，W3）；contracts 未引入——它的 `analysis` 包尚未发布（实测远端最新 `v0.6.0`），仍以本地 DTO 镜像冻结形状；镜像**只在消费端使用**，不违反「只认版本号」。
 2. **PG 是生产 Store，Memory 只做测试 / 无库本地装配**：启动时给了 DSN 就连接 + 迁移；空 DSN 会打 WARNING。`completed` 不可变由应用层 + DB 触发器双保险（ADR-0002）。
 3. **R1 已落 ⇒ `ResultReader` 读的是持久读面**（2026-10-25，core B6-3 `8537ffd`）：`status` 的唯一权威是 `backtest_jobs.result_status`，缺 `status` 只剩「上游没升到 R1」一种含义，照旧 fail-closed、**不解析错误串**；URL / DTO / 端口方法集都没动（§9.7 R1 原先的预期成立）。残留两条偏差如实登记：读面按**队列态**放行（pending / running / 引擎故障行 ⇒ 404），Migration 059 把迁移前的完成行回填成 `completed`。
 4. **R2 未裁 ⇒ artifact 形状是临时的**：`GET /runs/{id}/portfolio-snapshot` / `/factor-exposures` 是 interim wire 形状；owner 与最终形状定了再迁 contracts，端口不变。
