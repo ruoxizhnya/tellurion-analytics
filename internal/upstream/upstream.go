@@ -3,8 +3,8 @@
 // 端口定义在 internal/analysis（消费端定义，不 import 上游实现）。本包只做
 // 「HTTP → 领域 DTO + 哨兵」的映射，不放任何计算逻辑：
 //
-//   - ResultReader：core 的结果读取面（R1 未落前的 interim 适配器，见
-//     ResultReader 注释）；
+//   - ResultReader：core 的 R1 持久读面（`backtest_jobs.result_status` 为
+//     status 的唯一权威，core B6-3 `8537ffd`；见 ResultReader 注释的偏差）；
 //   - BenchmarkReader：tellurion-data 的 X1b `/datasets/resolve` +
 //     `/datasets/{hash}`；
 //   - HoldingsProvider / FactorExposureProvider：R2 artifact 面的 interim
@@ -63,13 +63,21 @@ func readErrorBody(r io.Reader) string {
 	return strings.TrimSpace(string(b))
 }
 
-// ResultReader 是 core 结果读取面的 interim 实现。
+// ResultReader 读 core 的 R1 K9-correct 持久读面 `GET /api/backtest/{id}/report`。
 //
-// 目标面是 R1 的 K9-correct 持久读取面；R1 落地前先读 core 现有的
-// `GET /api/backtest/{id}/report`：同步结果（contracts.BacktestResponse）带
-// status，可安全映射；异步结果体没有 status（job.go 的 domain.BacktestResult）
-// ⇒ 一律 ErrRunIncomplete，**绝不**解析 `"backtest produced an invalid run: ..."`
-// 之类的错误串来还原状态（docs/ARCHITECTURE.md §9.1 F1）。
+// core B6-3（`8537ffd`）把 K9 结论持久化成 `backtest_jobs.result_status`，该端点以
+// 这一列为 `status` 的唯一权威（列 → 结果体 → completed）：同步 / 异步两条写路径读
+// 出来都是三值，「跑完但无效」（completed/invalid）返 200 不再 404。URL 与 DTO 都没
+// 变，端口方法集不变（§9.7 R1 裁的就是这条）。
+//
+// 两条残留偏差在 core 侧，本仓不修也不猜：① 端点仍要求队列态 `status=="completed"`，
+// 所以 pending / running 与引擎故障行（failed/failed）一律 404 ⇒ 映射成 ErrRunNotFound，
+// K9 的 `failed` 经持久面到不了 409；② 迁移前的存量行按「旧代码把 invalid 写成 failed」
+// 回填成 completed，那批行读不回 invalid。
+//
+// **绝不**解析 `"backtest produced an invalid run: ..."` 之类的错误串还原状态
+// （docs/ARCHITECTURE.md §9.1 F1）。缺 status 一律 fail-closed：R1 之后这只可能是
+// 没升级到 B6-3 的上游。
 type ResultReader struct {
 	base   string
 	client *http.Client
@@ -135,7 +143,8 @@ func (r *ResultReader) GetResult(ctx context.Context, runID string) (*analysis.B
 	case analysis.ResultFailed:
 		return nil, &analysis.FailedError{Message: out.Error}
 	default:
-		return nil, &analysis.IncompleteError{Missing: "status", Detail: "upstream result is not K9-correct (R1 pending)"}
+		return nil, &analysis.IncompleteError{Missing: "status",
+			Detail: "upstream report body carries no K9 status (upstream predates core B6-3)"}
 	}
 }
 

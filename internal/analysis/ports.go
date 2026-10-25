@@ -7,13 +7,14 @@ import (
 
 // ResultReader 是上游回测结果的只读端口（docs/ARCHITECTURE.md §9.2）。
 //
-// K9-correct 的持久读取面尚未在 core 落地（§9.1 F1 / §9.7 R1），所以本仓只定义
-// 消费端端口：实现方必须把三值映射成下面的哨兵，**不得**把 invalid / failed
-// 当 completed 返回，也不得让本仓解析错误串还原状态。
+// 提供方是 core 的 R1 持久读面（§9.7 R1，core B6-3 `8537ffd` 已落）：实现方必须把
+// K9 三值映射成下面的哨兵，**不得**把 invalid / failed 当 completed 返回，也不得让
+// 本仓解析错误串还原状态。
 type ResultReader interface {
 	// GetResult 返回三值原样透传的结果。
-	// 错误：ErrRunNotFound / ErrRunIncomplete（pending/running 也归这一类）/
-	// *InvalidReasonsError / *FailedError。
+	// 错误：ErrRunNotFound（core 的读面对队列态非 completed 的行返 404，故
+	// pending / running 与引擎故障行落这里，见 §9.7 R1 的偏差）/
+	// ErrRunIncomplete（缺 status 或输入不足）/ *InvalidReasonsError / *FailedError。
 	GetResult(ctx context.Context, runID string) (*BacktestResponse, error)
 }
 

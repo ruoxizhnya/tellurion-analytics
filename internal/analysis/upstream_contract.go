@@ -14,8 +14,10 @@ const UpstreamContractVersion = "v1"
 
 // validateResultContract 校验 R1 结果面的形状：status 必须是 K9 三值之一。
 //
-// 缺 status 是 core 异步结果的旧编码（docs/ARCHITECTURE.md §9.1 F1）：按
-// run_result_incomplete 拒算，**不解析错误串**、不当 completed。
+// core B6-3 之后，读面对每个 run 结论都带 `status`（持久列
+// `backtest_jobs.result_status` 是权威）。缺 status 因此不再是「异步结果的旧编码」，
+// 而是上游没升级到 R1：照样按 run_result_incomplete 拒算，**不解析错误串**、
+// 不当 completed。
 func validateResultContract(resp *BacktestResponse) error {
 	if resp == nil {
 		return &IncompleteError{Missing: "run result"}
@@ -26,7 +28,7 @@ func validateResultContract(resp *BacktestResponse) error {
 	}
 	status := strings.TrimSpace(string(resp.Status))
 	if status == "" {
-		return &IncompleteError{Missing: "status", Detail: "upstream result has no status (R1 pending)"}
+		return &IncompleteError{Missing: "status", Detail: "upstream result has no status (pre-B6-3 upstream)"}
 	}
 	return &IncompleteError{Missing: "status", Detail: "unknown status " + status}
 }

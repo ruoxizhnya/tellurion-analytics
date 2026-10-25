@@ -6,7 +6,7 @@
 
 分析服务：基准 / 归因 / 敏感性 / 蒙特卡洛。**纯函数、只读上游**——不持有跨请求状态、不写任何上游表；但**拥有自己的结果表** `analysis.*`（reports / benchmarks / sensitivity_runs / mc_runs / attribution，见 `docs/db-schema.md`）。
 
-**状态**：已启动（2026-10-23，QT-43 施工 ①）——X4a~X4d 的代码与测试已落盘，`go build/vet/test` 全绿；**PG Store 与上游读取端口已于 2026-10-24（施工 ②）接线**，**sensitivity 逐点回填于 2026-10-25（W8）接通 X5b 父作业**；未配置的上游端口仍 fail-closed 成 `503 dependency_unavailable`。现状详见 `docs/ARCHITECTURE.md` §9.8，未落项见 `docs/TASKS.md` QT-43 施工记录（R1 / R2 / token 分发）。
+**状态**：已启动（2026-10-23，QT-43 施工 ①）——X4a~X4d 的代码与测试已落盘，`go build/vet/test` 全绿；**PG Store 与上游读取端口已于 2026-10-24（施工 ②）接线**，**sensitivity 逐点回填于 2026-10-25（W8）接通 X5b 父作业**，**结果读取于 2026-10-25 换到 core 的 R1 持久读面**（B6-3 `8537ffd`：`backtest_jobs.result_status` 是 `status` 的唯一权威）；鉴权与出站服务间凭证同日接线；未配置的上游端口仍 fail-closed 成 `503 dependency_unavailable`。现状详见 `docs/ARCHITECTURE.md` §9.8，未落项见 `docs/TASKS.md` QT-43 施工记录（R2 契约迁移 / token 分发 / R1 的两条 core 侧残留偏差）。
 
 **今天的实现**：本仓自有 `internal/analysis`（纯函数 + 端口 + Memory Store + DDL）、`internal/httpapi`（8 端点，全部过鉴权闸；`auth.go` 是 kit 适配，`policy.go` 是策略表）、`cmd/analyticsservice`。上游计算口径的参考实现仍在 core（`core:pkg/backtest/metrics`、`core:pkg/backtest/reporting`），本仓**只对照公式、不 import**。
 

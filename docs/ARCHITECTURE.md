@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-25
-verified-by: W3 鉴权接线（kit net/http 适配 + 8 端点策略表 + 启动闸，ADR-0003）
+verified-by: R1 换面（core B6-3 `8537ffd` 持久读面 + §9.7 R1 两条残留偏差）
 ---
 
 # 架构 — tellurion-analytics
@@ -69,7 +69,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| X4a | metrics + benchmark（同步） | 🔶 代码 + PG Store 已落；`ResultReader` / `BenchmarkReader` 已接（`-core-url` / `-data-url`），未配置仍 503 |
+| X4a | metrics + benchmark（同步） | 🔶 代码 + PG Store 已落；`ResultReader` 已接 **core R1 持久读面**（`-core-url`，§9.7 R1）、`BenchmarkReader` 已接 X1b（`-data-url`），未配置仍 503 |
 | X4b | attribution（Brinson / 因子） | 🔶 代码已落；`HoldingsProvider` / `FactorExposureProvider` 已接 interim artifact 面（`-artifact-url`），R2 形状未冻结 |
 | X4c | sensitivity + montecarlo（异步 + seed） | 🔶 montecarlo 端到端可用（PG 持久化）；sensitivity 已接 X5b（提交 + 逐点回填，W8），执行侧 worker 未落 |
 | X4d | 报告导出（html / csv；**pdf 已裁为非目标**，§9.7 R5） | 🔶 html / csv 可用且确定性；pdf 不做 |
@@ -85,7 +85,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 | # | 事实 | 取证（core `dbe4c68`） | 对施工的后果 |
 |---|---|---|---|
-| F1 | **结果读取面没有 K9-correct 的持久读路径；`backtest_jobs.result` 有两种不兼容编码。** | 异步路径：invalid 走 `UpdateJobFailed`、**结果体直接丢弃**（`pkg/backtest/job/job.go:490-505`），有效结果才 marshal `domain.BacktestResult`（**无 status**，`pkg/backtest/job/job.go:518`）。同步路径：`SaveSyncResult` 把完整 `contracts.BacktestResponse`（**有 status**）写进同一列（`pkg/backtest/job/job.go:709-741`）。`GET /api/backtest/:id` 返回的是 **job 行**（`cmd/analysis/handlers_backtest.go:160-172`）；`lookupBacktestResponse` 要求 `job.Status=="completed"` 再按 `BacktestResponse` 反序列化（`cmd/analysis/handlers_backtest.go:357-377`）⇒ 异步行的 status 为空、invalid 行直接 404。 | X4a **不能**按今天的读路径安全开工；解析错误串 `"backtest produced an invalid run: ..."` 来还原三值是**禁止项**。需先裁 **R1**：(a) core job 层把 invalid 落成 status=invalid + 保留结果体，或 (b) `run`/artifact 读取面（QT-44 / QT-63）提供 K9-correct 读取。**R1 落地前 QT-43 ⛔。** |
+| F1 | **结果读取面没有 K9-correct 的持久读路径；`backtest_jobs.result` 有两种不兼容编码。** | 异步路径：invalid 走 `UpdateJobFailed`、**结果体直接丢弃**（`pkg/backtest/job/job.go:490-505`），有效结果才 marshal `domain.BacktestResult`（**无 status**，`pkg/backtest/job/job.go:518`）。同步路径：`SaveSyncResult` 把完整 `contracts.BacktestResponse`（**有 status**）写进同一列（`pkg/backtest/job/job.go:709-741`）。`GET /api/backtest/:id` 返回的是 **job 行**（`cmd/analysis/handlers_backtest.go:160-172`）；`lookupBacktestResponse` 要求 `job.Status=="completed"` 再按 `BacktestResponse` 反序列化（`cmd/analysis/handlers_backtest.go:357-377`）⇒ 异步行的 status 为空、invalid 行直接 404。 | X4a **不能**按今天的读路径安全开工；解析错误串 `"backtest produced an invalid run: ..."` 来还原三值是**禁止项**。需先裁 **R1**：(a) core job 层把 invalid 落成 status=invalid + 保留结果体，或 (b) `run`/artifact 读取面（QT-44 / QT-63）提供 K9-correct 读取。**R1 落地前 QT-43 ⛔。** ⇒ **订正（2026-10-25）**：R1 已按 (a) 落地（core B6-3 `8537ffd` 新增持久列 `result_status`，两轴不合并），本行取证是基线 `dbe4c68` 的历史快照；今天的事实与两条残留偏差见 §9.7 R1。 |
 | F2 | **Brinson / 因子归因的输入不在结果 DTO 里。** | `domain.BacktestResult`（`pkg/domain/backtest.go:5-39`）只有聚合的 `PortfolioValues`（`Date / TotalValue / Cash / Positions`，`pkg/domain/backtest.go:41-45`）与 `Trades`——**没有逐标的持仓快照、没有因子暴露**。`BacktestState.Tracker` / `TargetPositions` 只在内存（`pkg/backtest/state/state.go:30-75`），不落结果。 | Brinson 需要**期末持仓 artifact**；因子归因需要**逐期因子值/暴露**。两者都是新的读取输入（**R2**）。**不许**用成交明细倒推持仓（T+1、部分成交、手数、多空都会让 `trades ≠ positions`）。 |
 | F3 | **Sensitivity 不是纯函数：它要再跑回测，而本仓「不做回测」。** | 设计 §4 说异步 job；job / batch / walkforward 的 owner 是 X5（`tellurion-orchestration:docs/TASKS.md` QT-44）；`pkg/backtest/batch` + `walkforward` 仍在 core；contracts 仓 `JobQueue` **零命中**。 | X4c 的 sensitivity 必须把参数网格**提交给 X5** 再读结果——依赖 QT-44（**R3**）。只有蒙特卡洛 / bootstrap 是纯函数，可以先落。**不许**在本仓内起回测循环。 |
 | F4 | **基准序列的粗粒度读取面尚未建；口径必须先钉住。** | 目标 `/datasets/resolve` + `/datasets/{hash}` 属 X1b（`tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §4.1 C 组），今天 data-service 只有逐 symbol 面（同文 D 组）；`docs/dataflow.md` §3 已把「全收益 vs 价格」列为超额失真的失败点。 | X4b 的基准输入依赖 X1b，或一个**显式** interim adapter（读逐 symbol OHLCV + 登记 `adjustment_basis`）。本仓**不抓行情**。`analysis.benchmarks` 只登记 `{code, source, adjustment_basis, dataset_hash}`（**R4**）。 |
@@ -98,7 +98,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 | 成员 | 今天（签名 + 取证） | 契约位 | 错误语义 | 版本策略 |
 |---|---|---|---|---|
-| `ResultReader`（目标） | **不存在**（F1） | `tellurion-contracts`（新包 `analysis`，X4a 落；core 与本仓两个使用方） | `GetResult(ctx, runID) (*contracts.BacktestResponse, error)`：`ErrRunNotFound` / `ErrRunNotCompleted`（pending/running）/ `ErrRunInvalid`（携带 `invalid_reasons`）/ `ErrRunFailed`（携带 `error`）/ `ErrRunResultIncomplete`。**三值原样透传，本仓不重判** | 方法集 frozen；加方法 = breaking；`GetResult` 的 wire 形状由 QT-50/openapi 统一 |
+| `ResultReader`（目标） | **已落**（本仓端口 `internal/analysis/ports.go` + 适配器 `internal/upstream/upstream.go`，读 core R1 持久读面，§9.7 R1） | `tellurion-contracts`（新包 `analysis`；core 与本仓两个使用方）——**包未发布**，DTO 仍是本仓本地镜像 v1 | `GetResult(ctx, runID) (*contracts.BacktestResponse, error)`：`ErrRunNotFound` / `ErrRunNotCompleted`（pending/running，**今天未实现**：core 对队列态非 completed 的行一律 404 ⇒ 落 `ErrRunNotFound`）/ `ErrRunInvalid`（携带 `invalid_reasons`）/ `ErrRunFailed`（携带 `error`；持久面读不到，只有 core 内存态路径给得出）/ `ErrRunResultIncomplete`。**三值原样透传，本仓不重判** | 方法集 frozen；加方法 = breaking；`GetResult` 的 wire 形状由 QT-50/openapi 统一 |
 | `BenchmarkReader`（目标） | 不存在；今天只能读 data-service 逐 symbol OHLCV（F4） | `contracts/analysis` | `GetSeries(ctx, code, start, end, basis) (Series, error)`：`ErrBenchmarkNotRegistered` / `ErrBenchmarkDataUnavailable`；**不回落「用价格指数冒充全收益」** | 加参数 = MINOR；改 `basis` 语义 = breaking（超额收益不可比） |
 | `JobQueue`（目标） | 不存在；contracts 零命中（F3） | **QT-44** 的 port（不属本仓定义） | 提交网格 / 查询状态 / 取结果；失败逐条可归因 | 以 QT-44 对表为准；本仓只消费 |
 | `metrics.CalculateMetrics` | `pkg/backtest/metrics/performance.go:13`：`CalculateMetrics(portfolioValues []domain.PortfolioValue, trades []domain.Trade, riskFreeRate float64) domain.RiskMetrics` | 目标：本仓（**搬迁，不 import**；依赖 contracts 的 domain 类型） | 空序列返回零值（`pkg/backtest/metrics/performance.go:15` / `pkg/backtest/metrics/performance.go:21`）——**本仓调用前必须 fail-closed**：空 / 不足 ⇒ 409 `run_result_incomplete`，不把零值当结果 | 指标定义 frozen（`metrics_version`）；改定义 = MAJOR/ADR |
@@ -162,7 +162,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 | # | 事项 | 当前状态 | 建议 / 影响 |
 |---|---|---|---|
-| R1 | **K9-correct 的结果读取面**（F1） | 异步 invalid 落 failed 且丢结果；同步/异步两种编码。**本仓已接 interim 适配器**：`internal/upstream.ResultReader` 读 core 现有 `GET /api/backtest/{id}/report`，有 `status` 才映射三值；无 `status`（异步结果）⇒ `409 run_result_incomplete`，解析错误串的路径**零实现**。消费端形状与失败语义已冻结为 **`UpstreamContractVersion=v1`**（`api-schema.md` §6.1） | 建议二选一：(a) core job 层把 invalid 落成 `status=invalid` + 保留结果体（改 OBS-01 的落库口径）；(b) `run`/artifact 读取面（QT-44 / QT-63）提供 K9-correct 读取。R1 落地后只换适配器的 URL/路径，端口与 DTO 不变 |
+| R1 | **K9-correct 的结果读取面**（F1） | ✅ **已落（core B6-3 `8537ffd`，2026-10-25）**：`backtest_jobs.result_status` 持久化 K9 结论，`GET /api/backtest/{id}/report` 以该列为 `status` 的唯一权威（列 → 结果体 → completed），`completed/invalid` 行返 200 不再 404。本仓 `internal/upstream.ResultReader` 换到这一面：**URL 与 DTO 都没变**（正是本节原先写的「只换面，端口不变」），缺 `status` 的分支保留但语义改成「上游没升到 B6-3」。**残留偏差**（`api-schema.md` §6.1）：端点仍按**队列态**放行 ⇒ pending / running 与引擎故障行（`failed`/`failed`）读成 `404 run_not_found`，K9 的 `failed` 经持久面到不了 409；Migration 059 把迁移前的完成行回填成 `completed`，旧 invalid 读不回 | 消费端已由 `TestResultReader_PersistentK9ReadPlane` 按 core 的 overlay 建模钉住。要把两条偏差变成正确语义，得先裁「读面按队列态还是结论态放行」——属 core 侧改动，不在本仓猜 |
 | R2 | **holdings / 因子暴露 artifact**（F2） | 结果 DTO 无逐标的持仓；`BacktestState` 只在内存。**本仓已按临时形状接 interim artifact 适配器**：`PortfolioSnapshot{holdings, benchmark_sector_weights, benchmark_sector_returns}`、`FactorExposures{factors[], dataset_hash}`（`internal/analysis/model.go`），HTTP 面 `GET /runs/{id}/portfolio-snapshot` / `/factor-exposures`；未配置即 503。消费端形状已冻结为 **`UpstreamContractVersion=v1`**（`api-schema.md` §6.2：`dataset_hash` 与行业权重 / 收益必填） | 定 artifact 形状与 owner（core 产、本仓读）后，把这两个临时 DTO 迁到 `tellurion-contracts` 的 analysis 包；**端口方法集不变**，形状变更走契约流程 |
 | R3 | **sensitivity 的 job 队列**（F3） | **已落（2026-10-25，W8）**：orchestration 的 X5b 父端点（W6）已接；本仓 `SensitivityQueue` = `Submit` + `Status`，`analysis.sensitivity_runs.points` 按父汇总逐点回填；未配置 `-orchestration-url` 仍 503 | 执行侧（worker）与完整 RunSpec 的装配仍不在本仓：`base_run_spec` 目前只带 `run_id` 锚点，worker 落地后如需完整 spec 由执行侧解析（契约变更走 R3 重裁） |
 | R4 | **基准数据面与口径**（F4） | **X1b 已落**（`tellurion-data` `/datasets/resolve` + `/datasets/{hash}`）；本仓 `BenchmarkReader` 已接 X1b，按登记的 `adjustment_basis` 取数，basis 不一致即 409 | 保持 `adjustment_basis` 在登记身份里；若将来改走别的数据面，只换适配器 |
@@ -187,7 +187,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 | `internal/analysis/ddl.go` | 5 张表 DDL + `reports_completed_immutable` 触发器（`Migrations()` 返回副本） |
 | `internal/analysis/export.go` | 确定性 html / csv 渲染（不读时钟、不读随机） |
 | `internal/analysis/service.go` | 门面：读上游 → 纯函数 → 落 `analysis.*`；未接线端口 ⇒ `ErrDependencyUnavailable` |
-| `internal/upstream/upstream.go` | **上游 HTTP 适配器**：`ResultReader`（core `/api/backtest/{id}/report`，interim）、`BenchmarkReader`（X1b resolve + snapshot）、`ArtifactReader`（holdings / 因子暴露，interim） |
+| `internal/upstream/upstream.go` | **上游 HTTP 适配器**：`ResultReader`（core `/api/backtest/{id}/report` = **R1 持久读面**，`result_status` 是 `status` 权威）、`BenchmarkReader`（X1b resolve + snapshot）、`ArtifactReader`（holdings / 因子暴露，interim） |
 | `internal/upstream/sensitivity.go` | **X5b 父作业适配器**：`POST /api/runs/parents`（batch，`base_run_spec={"run_id":…}` 锚点）+ `GET /api/runs/parents/{id}`（`summary.Tasks` 优先，回落 `children`） |
 | `internal/httpapi/api.go` | 8 端点（Go 1.22 mux pattern）、严格 JSON 解码（拒未知字段 / 拒尾随 / 1 MiB 上限）、13 词错误码映射 |
 | `cmd/analyticsservice/main.go` | 进程入口：`-dsn`（PG + 启动迁移）/ `-core-url` / `-data-url` / `-artifact-url` / `-orchestration-url`；未给 DSN 时 Memory（dev）；Async Executor；回环 `127.0.0.1:8087` |
@@ -196,7 +196,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 | 端点 | 计算 | 上游 | 结论 |
 |---|---|---|---|
-| metrics | ✅ | `ResultReader` 已接（interim） | 已接 |
+| metrics | ✅ | `ResultReader` 已接（R1 持久读面） | 已接 |
 | benchmark | ✅ | `ResultReader` + `BenchmarkReader`（X1b）已接 | 已接 |
 | attribution (brinson) | ✅（临时形状） | `ResultReader` + `HoldingsProvider`（interim artifact）已接 | 已接 |
 | attribution (factor) | ✅（临时形状） | `ResultReader` + `FactorExposureProvider`（interim artifact）已接 | 已接 |
@@ -209,7 +209,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 1. **只有一条跨仓依赖**：`go.mod` 仅 `github.com/jackc/pgx/v5`。契约仓的 `analysis` 包尚未发布，仍以本地 DTO 镜像冻结形状；镜像**只在消费端使用**，不违反「只认版本号」。
 2. **PG 是生产 Store，Memory 只做测试 / 无库本地装配**：启动时给了 DSN 就连接 + 迁移；空 DSN 会打 WARNING。`completed` 不可变由应用层 + DB 触发器双保险（ADR-0002）。
-3. **R1 未落 ⇒ ResultReader 是 interim**：读 core 现有 report 端点，有 `status` 才映射三值；无 `status` 的异步结果 fail-closed，**不解析错误串**。
+3. **R1 已落 ⇒ `ResultReader` 读的是持久读面**（2026-10-25，core B6-3 `8537ffd`）：`status` 的唯一权威是 `backtest_jobs.result_status`，缺 `status` 只剩「上游没升到 R1」一种含义，照旧 fail-closed、**不解析错误串**；URL / DTO / 端口方法集都没动（§9.7 R1 原先的预期成立）。残留两条偏差如实登记：读面按**队列态**放行（pending / running / 引擎故障行 ⇒ 404），Migration 059 把迁移前的完成行回填成 `completed`。
 4. **R2 未裁 ⇒ artifact 形状是临时的**：`GET /runs/{id}/portfolio-snapshot` / `/factor-exposures` 是 interim wire 形状；owner 与最终形状定了再迁 contracts，端口不变。
 5. **sensitivity 的 points 由父汇总驱动（2026-10-25）**：`base_run_spec` 只带 `run_id` 锚点，网格交给 X5b；`points` 只能从 NULL 一次写满，缺 point 就整份失败（不补、不猜）。执行侧（worker）与完整 RunSpec 装配不在本仓。
 6. **鉴权已接线（2026-10-25）**：kit `auth/httpadapter` + 本仓策略表，全端点 401/403/503 fail-closed（ADR-0003）。

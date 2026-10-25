@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-25
-verified-by: W8 sensitivity 逐点回填（父作业提交 / 轮询 / points 回填 + 真进程 E2E）
+verified-by: R1 换面（读取边 `ResultReader` = core 持久读面；队列态 404 入失败模式表）
 ---
 
 # Dataflow — tellurion-analytics
@@ -41,7 +41,7 @@ verified-by: W8 sensitivity 逐点回填（父作业提交 / 轮询 / points 回
 
 | 端口 | 上游 | 失败语义 |
 |---|---|---|
-| `ResultReader` | core `GET /api/backtest/{id}/report`（R1 落地前的 interim；只认带 `status` 的结果） | 404 → `run_not_found`；缺 `status` → `run_result_incomplete`（**不解析错误串**）；网络 / 5xx → `dependency_unavailable` |
+| `ResultReader` | core `GET /api/backtest/{id}/report`（**R1 持久读面**，core B6-3 `8537ffd`：`backtest_jobs.result_status` 是 `status` 的唯一权威，`completed/invalid` 行返 200 可读） | 404 → `run_not_found`（含队列态非 completed 的行：pending / running / 引擎故障，见 `api-schema.md` §6.1 偏差）；缺 `status` → `run_result_incomplete`（**不解析错误串**）；网络 / 5xx → `dependency_unavailable` |
 | `BenchmarkReader` | tellurion-data X1b：`GET /datasets/resolve` → `GET /datasets/{hash}` | 任何取不到 / basis 不一致 → `benchmark_data_unavailable` |
 | `HoldingsProvider` / `FactorExposureProvider` | interim artifact 面：`GET /runs/{id}/portfolio-snapshot`、`/runs/{id}/factor-exposures` | 404 / 空体 → `run_result_incomplete`（点名缺哪个）；网络 / 5xx → `dependency_unavailable` |
 | `SensitivityQueue` | X5b：`POST /api/runs/parents`（batch）+ `GET /api/runs/parents/{id}`（counts + `summary.Tasks`，无 summary 回落 `children`） | 404 → 父作业不存在（报告 failed，终态）；网络 / 非 2xx → `dependency_unavailable`（报告保持 pending，下次读取重试） |
@@ -55,8 +55,9 @@ verified-by: W8 sensitivity 逐点回填（父作业提交 / 轮询 / points 回
 | 鉴权闸未装配 / 角色不足 | 分析面被匿名调用 | 统一 fail-closed：未装配 503，无凭证 401，越权 403（2026-10-25） |
 | 缺 seed | 结果不可复现 | 400 `seed_required`，拒算 |
 | 上游结果不完整 | 指标算出来是错的 | 409 `run_result_incomplete`，点名缺哪个输入（`portfolio_values` / `benchmark_series` / `run result`） |
-| 结果读取面把 invalid / failed 当 completed | 产出「看起来正常」的假报告 | 三值分别拒算（`ARCHITECTURE.md` §9.1 F1）；**不解析 job 错误串**；缺 `status` 的异步结果直接 409 |
-| 上游读取面把「没有 status」的旧编码当成功 | 同上 | `ResultReader` 只接受带 K9 `status` 的结果（见上表） |
+| 结果读取面把 invalid / failed 当 completed | 产出「看起来正常」的假报告 | 三值分别拒算（`ARCHITECTURE.md` §9.1 F1）；**不解析 job 错误串**；缺 `status` 直接 409 |
+| 上游没升到 R1（结果体没有 `status`） | 同上 | `ResultReader` 只接受带 K9 `status` 的结果（见上表）。core B6-3 之后读面恒带 `status`，这条腿今天只剩防御作用 |
+| run 还在跑 / 引擎故障（队列态非 completed） | 本仓报 `404 run_not_found`，而不是「还没跑完」 | **已登记的偏差**（`api-schema.md` §6.1）：持久读面按队列态放行，本仓不二次调用猜状态；要分辨得先裁 core 的读面口径 |
 | 上游端口未配置 | 端点不可用 | 503 `dependency_unavailable`（进程启动日志会列出哪些端口已接线）；**不伪造结果、不返回空报告** |
 | sensitivity 没有父作业队列 | 网格跑不出来 | 503 `dependency_unavailable`；**不在本仓起回测循环**（R3） |
 | 父作业给的点少于计划 / 某点没有 K9 状态 / 父 total 与展开数不符 | 出「半张网格」被当成完整结论 | 报告 `failed` + 点名缺哪个点；**不写 points、不补齐、不猜形状** |

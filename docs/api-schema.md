@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-25
-verified-by: W8 sensitivity 逐点回填（X5b 父作业端点 + 202 parent_job_id + 100 点上限）
+verified-by: R1 换面（§6.1 `status` 权威 = core `result_status` + 残留偏差；R2 前置实测 contracts `v0.6.0` 无 `analysis` 包）
 ---
 
 # API Schema — tellurion-analytics
@@ -17,7 +17,7 @@ verified-by: W8 sensitivity 逐点回填（X5b 父作业端点 + 202 parent_job_
 > `kind=access` → 角色 any-of），策略表在本仓 `internal/httpapi/policy.go`；**全部端点**过闸且 fail-closed：
 > 未装配 Authorizer → 503，无凭证 / 坏 token → 401，越权 → 403。6 个 POST = trader，2 个 GET = viewer。
 > 无 secret + 回环 = 开放；无 secret + 非回环 = **拒绝启动**。现状登记见 §7。
-> **前置现状**：sensitivity 的父作业队列走 G7/X5b（`tellurion-orchestration` QT-44，**W6 已落**）；结果读取走 R1 落地前的 interim 适配器（无 `status` 的异步结果 fail-closed）；基准走 X1b（已落）；holdings / 因子暴露走 interim artifact 面（R2 形状未冻结）。缺依赖即报错，不降级出假报告。
+> **前置现状**：sensitivity 的父作业队列走 G7/X5b（`tellurion-orchestration` QT-44，**W6 已落**）；结果读取走 core 的 **R1 持久读面**（B6-3 `8537ffd`，2026-10-25：`backtest_jobs.result_status` 是 `status` 的唯一权威，「跑完但无效」返 200 不再 404；队列态非 completed 的行仍 404，偏差见 §6.1）；基准走 X1b（已落）；holdings / 因子暴露走 interim artifact 面（R2 形状未冻结）。缺依赖即报错，不降级出假报告。
 
 ## 1. 接口面
 
@@ -103,7 +103,7 @@ verified-by: W8 sensitivity 逐点回填（X5b 父作业端点 + 202 parent_job_
 
 > 这不是对外 API，但它是**本仓读上游**的冻结形状——`409 / 404 / 503` 的归因全靠它，所以同样按契约管理。
 > 契约版本：`analysis.UpstreamContractVersion = "v1"`（`internal/analysis/upstream_contract.go`）；形状镜像在 `internal/analysis/model.go`。
-> **仍未迁 `tellurion-contracts`**（该仓 `analysis` 包未发布）。迁移时端口方法集与校验语义不变，只换 DTO 的 owner。
+> **仍未迁 `tellurion-contracts`**：该仓 `analysis` 包未发布——实测（2026-10-25）远端最新 tag 是 `v0.6.0`，`v0.6.0` 与 `origin/main` 的业务包只有 `dataprotocol` / `domain` / `engine` / `fees`，**没有 `analysis/`**。迁移时端口方法集与校验语义不变，只换 DTO 的 owner。
 > **版本策略**：加字段 = MINOR（`omitempty`，消费端忽略未知字段）；**改名 / 删字段 / 改语义 = breaking**，先改本节再改代码。
 > **钉死方式**：`TestUpstreamContractWireShape` 用 golden JSON 往返比对（字段名被改 / 被删即红）；`TestUpstreamContractArtifactFailClosed` 钉必填项。
 
@@ -112,7 +112,7 @@ verified-by: W8 sensitivity 逐点回填（X5b 父作业端点 + 202 parent_job_
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `id` | string | 否 | run id（幂等键来自请求，不依赖它） |
-| `status` | `completed \| invalid \| failed` | **是** | K9 三值，**原样透传**；缺失 / 未知 ⇒ `409 run_result_incomplete`（`missing=status`），**不解析错误串** |
+| `status` | `completed \| invalid \| failed` | **是** | K9 三值，**原样透传**；上游权威是 core 的持久列 `backtest_jobs.result_status`（overlay 顺序：列 → 结果体 → completed）；缺失 / 未知 ⇒ `409 run_result_incomplete`（`missing=status`），**不解析错误串** |
 | `error` | string | failed 时 | 上游原文透传（`run_result_failed`） |
 | `invalid_reasons` | string[] | invalid 时 | 原样透传（`run_result_invalid`） |
 | `start_date` / `end_date` | string | 否 | 期间 |
@@ -121,7 +121,14 @@ verified-by: W8 sensitivity 逐点回填（X5b 父作业端点 + 202 parent_job_
 | `total_trades` / `win_trades` / `lose_trades` | int | 否 | 同上 |
 | `portfolio_values` | `{date, total_value}[]` | completed 时 | 净值曲线；空 ⇒ `409 run_result_incomplete`（`missing=portfolio_values`） |
 
-**fail-closed 规则**：`status` 不在三值内 ⇒ 拒算（含 core 异步结果的「无 status」编码，`ARCHITECTURE.md` §9.1 F1）。**禁止**从 `"backtest produced an invalid run: ..."` 之类字符串反推状态。
+**fail-closed 规则**：`status` 不在三值内 ⇒ 拒算。B6-3 之后「无 status」**不再是异步结果的合法旧编码**，出现它只意味着上游部署没升到 R1 —— 照样 409，不当 completed、不猜状态。**禁止**从 `"backtest produced an invalid run: ..."` 之类字符串反推状态。
+
+**残留偏差（在 core 侧，本仓不猜、也不二次调用去补）**：
+
+1. report 端点仍要求**队列态** `status=="completed"` 才可读 ⇒ pending / running 与引擎故障行（`status=failed` + `result_status=failed`）经持久面一律 **404**，本仓映射成 `404 run_not_found`；K9 的 `failed` 因此只能经 core 的内存态路径到达（`409 run_result_failed`）。
+2. Migration 059 把迁移前的完成行回填成 `completed`（旧代码当时把 invalid 写成 `status=failed`），那批历史行读不回 invalid。
+
+两条各有一条用例钉住（`internal/upstream.TestResultReader_PersistentK9ReadPlane`，按 core 的 overlay 建模）；要把它们变成正确语义，得先裁「读面按队列态还是结论态放行」，属 core 侧的改动。
 
 ### 6.2 R2 artifact 面 — `PortfolioSnapshot` / `FactorExposures`
 

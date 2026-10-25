@@ -155,8 +155,8 @@ func TestEndToEndWithPostgres(t *testing.T) {
 
 // newE2EUpstream 模拟三个上游读取面（K9 结果 / X1b 数据集 / R2 artifact）。
 //
-// R1 的 K9-correct 读取面尚未在 core 落地（docs/ARCHITECTURE.md §9.7 R1），
-// 这里按 ResultReader 的冻结语义返回 status 字段，用于验证**本仓**的接线；
+// 结果面按 core R1 持久读面（B6-3 `8537ffd`）的口径带 `status`；这里只是它的替身，
+// 用来验证**本仓**的接线，读面自身的两轴语义由 internal/upstream 的对表用例钉。
 // 它不是 core 的替代实现。
 func newE2EUpstream(t *testing.T, runID, benchCode, suffix string) *httptest.Server {
 	t.Helper()

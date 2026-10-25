@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-10-25
-verified-by: W8 sensitivity 逐点回填（X5b 父作业 HTTP 适配 + 真进程 E2E + fail-closed）
+verified-by: R1 换面（ResultReader 接 core B6-3 持久读面 + 对表用例 + 两条 core 侧残留偏差登记）
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -62,7 +62,7 @@ verified-by: W8 sensitivity 逐点回填（X5b 父作业 HTTP 适配 + 真进程
    - `completed` 不可变：应用层先判断 + **DB 触发器** `reports_completed_immutable` 兜底（绕过程序直接 `UPDATE` 也被拒，SQLSTATE 55000）。理由与取舍见 `adr/0002-报告不可变由PG触发器兜底.md`。
    - `cmd/analyticsservice`：`-dsn` / `ANALYTICS_DATABASE_DSN` 有值 → 连接 + 启动迁移 + PG Store；空值 → Memory（仅本地/测试，启动日志打 WARNING）。`CHAR(64)` 列读取用 `rtrim`，避免短值被空格污染。
 2. **上游读取端口**（`internal/upstream`；端口定义不变，只加适配器）
-   - `ResultReader`：`-core-url` / `ANALYTICS_CORE_URL` → `GET /api/backtest/{id}/report`。K9 三值原样映射；**缺 `status` 的异步结果一律 409 `run_result_incomplete`**，不解析错误串。R1 的专用 K9-correct 持久读面尚未落地，故这是 interim 适配器（`ARCHITECTURE.md` §9.7 R1）。
+   - `ResultReader`：`-core-url` / `ANALYTICS_CORE_URL` → `GET /api/backtest/{id}/report`。K9 三值原样映射；**缺 `status` 的异步结果一律 409 `run_result_incomplete`**，不解析错误串。R1 的专用 K9-correct 持久读面尚未落地，故这是 interim 适配器（`ARCHITECTURE.md` §9.7 R1）。（**2026-10-25 更新**：R1 已由 core B6-3 落地，本仓已换面——本行是当时的状态快照，见「R1 换面」记录）
    - `BenchmarkReader`：`-data-url` / `ANALYTICS_DATA_URL` → X1b `GET /datasets/resolve` + `GET /datasets/{hash}`；`adjustment` 按登记口径传入，回包 basis 不一致即 `benchmark_data_unavailable`（不用价格指数冒充全收益）。
    - `HoldingsProvider` / `FactorExposureProvider`：`-artifact-url` / `ANALYTICS_ARTIFACT_URL` → interim artifact 面 `GET /runs/{id}/portfolio-snapshot`、`GET /runs/{id}/factor-exposures`；404 / 空体 → `run_result_incomplete` 并点名缺哪个输入。R2 的 owner / 形状未裁，DTO 仍是本地临时镜像，冻结后迁 contracts。
    - 未配置 URL 的端口保持 nil，对应端点仍 503 —— fail-closed 语义未变。
@@ -75,7 +75,7 @@ verified-by: W8 sensitivity 逐点回填（X5b 父作业 HTTP 适配 + 真进程
 **未落（如实登记，不算完成）**
 
 1. **sensitivity 逐点回填**：`SensitivityQueue` 仍只提交；`analysis.sensitivity_runs.points` 与完成态推进依赖 G7 的 X5b（`tellurion-orchestration` QT-44：等父端点/W6）。按派发要求「不到就停」，本次不预设载荷形状。（2026-10-25 W8 已结清，见下方施工记录）
-2. **R1 的 K9-correct 持久读面**：core 侧尚未落地；当前适配器对同步结果可用、对无 `status` 的异步结果 fail-closed。R1 落地后只换 URL/路径，端口与 DTO 不变。
+2. **R1 的 K9-correct 持久读面**：core 侧尚未落地；当前适配器对同步结果可用、对无 `status` 的异步结果 fail-closed。R1 落地后只换 URL/路径，端口与 DTO 不变。（**2026-10-25 R1 换面已结清**，见下方「R1 换面」记录：实际连 URL 都没换。）
 3. **R2 artifact 形状与 owner**：wire 形状仍是本地临时镜像，未迁 contracts。
 4. **PDF 导出**：**R5 已裁（2026-10-24）= 非目标**，只承诺 html / csv。
 5. ~~**鉴权（裁-15，2026-10-25 已定，可开工）**~~ **✅ 已落（2026-10-25，W3）**：QT-50 ④ 的服务侧腿。口径：kit `v0.1.1` 的 net/http 适配（非 gin 中间件）；policy 表：6 个 `POST /api/analysis/*`（计算并落报告）= trader，`GET /api/analysis/reports/{id}` 与 `/export` = viewer；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。`AuthStatus = "enforced"`，原 `TestAuthNotWiredCurrentState` 已翻转成 401/403 断言。
@@ -115,7 +115,7 @@ verified-by: W8 sensitivity 逐点回填（X5b 父作业 HTTP 适配 + 真进程
 
 **未落（如实登记，不算完成；本单仍 🔶）**
 
-1. **R1 的 K9-correct 持久读面**：核心在 core 侧（`ARCHITECTURE.md` §9.7 R1），本仓仍是 interim 适配器（读 core 现有 report 端点）。本次只是把**消费端形状与失败语义**冻结成 v1，不等于 R1 落地。
+1. **R1 的 K9-correct 持久读面**：核心在 core 侧（`ARCHITECTURE.md` §9.7 R1），本仓仍是 interim 适配器（读 core 现有 report 端点）。本次只是把**消费端形状与失败语义**冻结成 v1，不等于 R1 落地。（R1 已于 2026-10-25 结清，见下方「R1 换面」记录）
 2. **R2 artifact 的 owner 与最终形状**：本次冻结的是「本仓读它」的契约版本，owner 未定、**未迁 `tellurion-contracts`**（该仓 `analysis` 包未发布）。迁移时端口方法集与校验语义不变。
 3. **sensitivity 逐点回填**：`SensitivityQueue` 仍只提交，`analysis.sensitivity_runs.points` 与完成态推进依赖 QT-44（等父端点/W6）。（2026-10-25 W8 已结清）
 4. **鉴权**：本次只做**现状登记**（常量 + 可执行锚点 + 文档），**未接线任何鉴权中间件**，不产出 401 / 403；安全边界仍是回环监听。
@@ -143,7 +143,7 @@ verified-by: W8 sensitivity 逐点回填（X5b 父作业 HTTP 适配 + 真进程
 
 **未落（本单仍 🔶）**
 
-1. **R1 的 K9-correct 持久读面**：核心在 core 侧，本仓仍是 interim 适配器（见上一条施工记录）。
+1. ~~**R1 的 K9-correct 持久读面**：核心在 core 侧，本仓仍是 interim 适配器（见上一条施工记录）。~~（**2026-10-25 已结清**：core B6-3 落了持久读面，本仓已换面，见下方「R1 换面」记录）
 2. **R2 artifact 的 owner 与最终形状**：owner 未定、未迁 `tellurion-contracts`。
 3. **sensitivity 逐点回填**：依赖 QT-44（等父端点/W6）。（2026-10-25 W8 已结清）
 4. **token 分发（跨仓）**：鉴权开启后 core / UI 调用本服务必须持 token（POST trader / GET viewer）；分发不在本仓。
@@ -192,7 +192,45 @@ verified-by: W8 sensitivity 逐点回填（X5b 父作业 HTTP 适配 + 真进程
 1. **执行侧（worker）仍未落地**：父汇总由执行侧调用 `parents.ApplyBatchSummary` 产生；本仓只读。W8 的真进程 E2E 用 SQL 模拟该写回，**不代表 worker 已存在**。
 2. **`base_run_spec` 只有 `run_id`**：完整 RunSpec 的装配属执行侧（R3 未裁），当前锚点只保证计划身份可算、网格可展开。
 3. **失败报告的逐点 error 只在 `error` 文本 + `analysis.sensitivity_runs.points`**：报告体仍遵守「completed 才有 body」的 DDL 约束，API 不单独暴露 failed 报告的 points。
-4. R1 持久读面、R2 owner / contracts 迁移、token 分发仍按上一条记录未落。
+4. ~~R1 持久读面~~（**2026-10-25 R1 换面已结清**，见下方记录）、R2 owner / contracts 迁移、token 分发仍按上一条记录未落。
+
+#### 施工记录（2026-10-25，R1 换面：`ResultReader` 接 core 持久读面）
+
+> **依据（先证伪再动手）**：core B6-3 `8537ffd`（`feat(core): backtest_jobs.result_status 三值持久读面`）实测 `git merge-base --is-ancestor 8537ffd main` = 真 ⇒ R1 前置已解除。R2 仍 ⛔：`go list -m -versions` 实测远端最新 tag 是 `v0.6.0`，且 `v0.6.0` 与 `origin/main` 的业务包只有 `dataprotocol` / `domain` / `engine` / `fees`，**没有 `analysis/`**。
+
+**已落**
+
+1. **消费端换面，但 URL / DTO / 端口方法集零改动**：core 把 K9 结论持久化成 `backtest_jobs.result_status`，`GET /api/backtest/{id}/report` 以该列为 `status` 的唯一权威（回落顺序：列 → 结果体 → `completed`），`completed/invalid` 行返 **200** 不再 404。§9.7 R1 原裁「落地后只换适配器的 URL/路径」——今天验证成立，且实际连路径都没换（core 把权威做进了同一个端点）。
+2. **语义改判**：`internal/upstream.ResultReader` 不再是 interim。缺 `status` 从「core 异步结果的旧编码」改判成「上游没升级到 B6-3」，仍然 `409 run_result_incomplete`（`missing=status` 在 §6.3 闭集里不变）、**不解析错误串**这条没动；`IncompleteError.Detail` 与 `validateResultContract` 的文案同批去掉「R1 pending」。
+3. **端口注释订正（实现与注释对不上）**：`internal/analysis/ports.go` 原写「pending/running 归 `ErrRunIncomplete`」，实测走的是 `ErrRunNotFound`——core 的端点要求队列态 `status=="completed"`，其余一律 404。按实测改口径，不改行为。
+4. **对表用例**：`internal/upstream.TestResultReader_PersistentK9ReadPlane` 按 core 的 overlay 建模（handler 的出处点名到 `core:cmd/analysis/handlers_backtest.go`），6 条子用例钉两轴：异步有效（列 `completed` + 旧结果体无 status）→ 可读；异步 invalid（`completed/invalid` + reasons）→ `InvalidReasonsError`；invalid 但没给 reasons → 裸 `ErrRunInvalid`（不回落 completed）；列与体都无 status → core 回落 `completed`；引擎故障（`failed/failed`）→ 404 → `run_not_found`；还在跑（`running` + NULL）→ 404 → `run_not_found`。
+5. **文档同笔**：`api-schema.md`（前置现状 / §6.1 `status` 权威 + 两条偏差 / §6 迁 contracts 的实测前置）、`dataflow.md`（读取边表 + 失败模式表新增「还在跑 / 引擎故障被读成 `run_not_found`」一行）、`ARCHITECTURE.md`（§8 X4a、§9.1 F1 加订正、§9.2 A 组 `ResultReader` 行、§9.7 R1 改 ✅、§9.8 三处 interim 口径与取舍 3）、`AGENTS.md` §1 状态。
+
+**破坏验证（两条腿，实测退出码）**
+
+- 腿 A：删掉 `GetResult` 的 `case analysis.ResultInvalid` 分支 ⇒ `TestResultReader_K9Mapping/invalid_with_reasons`、`TestResultReader_PersistentK9ReadPlane/async_invalid…`、`/invalid_without_reasons…` 三条红（`want InvalidReasonsError[data_gap_skipped], got run result incomplete: missing status`），`LEG_A_EXIT=1`；`cp` 逐字节还原后 `upstream.go` SHA-256 与改前一致（`2462b46afbb6a8c025704ad3e34381d7b25297865e3cc8f6cdb6615a0996748e`），复跑 `ok`（`LEG_A_RESTORED_EXIT=0`）。
+- 腿 B：删掉 404 → `ErrRunNotFound` 那条分支 ⇒ `not_found`、`engine_failure…`、`still_running…` 三条红（`want run not found, got dependency unavailable`），`LEG_B_EXIT=1`；同法还原，SHA-256 一致后复跑 `ok`（`LEG_B_RESTORED_EXIT=0`）。
+
+**门禁（真实输出，本机 Windows / Go 1.25.0，无 DSN ⇒ PG 与真进程腿按设计 skip）**
+
+```
+gofmt -l .                      → 无输出（GOFMT_EXIT=0）
+go build ./...                  → BUILD_EXIT=0
+go vet ./...                    → VET_EXIT=0
+go test ./... -count=1          → TEST_EXIT=0
+  ok  tellurion-analytics/internal/analysis   0.061s
+  ok  tellurion-analytics/internal/httpapi    0.084s
+  ok  tellurion-analytics/internal/upstream   0.074s
+```
+
+**未落（如实登记，本单仍 🔶）**
+
+1. **两条 core 侧残留偏差**（本仓不猜、也不二次调用去补，见 `api-schema.md` §6.1）：① 持久读面按**队列态**放行 ⇒ pending / running 与引擎故障行读成 `404 run_not_found`，K9 的 `failed` 经持久面到不了 `409 run_result_failed`（今天只有 core 内存态路径给得出）；② Migration 059 把迁移前的完成行回填成 `completed`，旧代码写下的 invalid（当时落成 `status=failed`）读不回 invalid。要修先裁「读面按队列态还是结论态放行」，改在 core。
+2. **本轮没有真 core 进程 + 真 PG 的 invalid 行端到端**：新用例是契约级对表（httptest 按 core overlay 建模）。代价：core 侧若改了 overlay，本仓这条只能靠「出处注释」提醒同步，不会被真链路自动逮到。
+3. **R2 契约迁移仍 ⛔**：`tellurion-contracts` 的 `analysis` 包未发布（实测见上），`PortfolioSnapshot` / `FactorExposures` / `BacktestResponse` 的本地镜像 v1 继续留本仓。
+4. token 分发（跨仓）仍不在本仓。
+
+**验收现状**：QT-43 的 ⑤ 三条判据维持**真库 E2E** 层成立（W8 记录）；本单保持 🔶，未落项收窄为「R2 owner / contracts 迁移、token 分发、R1 的两条 core 侧残留偏差、真 core 进程的 invalid 行端到端」。
 
 ---
 
