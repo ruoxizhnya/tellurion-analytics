@@ -109,6 +109,35 @@ func TestResultReader_K9Mapping(t *testing.T) {
 	}
 }
 
+// TestUpstream_SendsServiceToken（裁-15）：core / data 上了鉴权闸后，三个
+// reader 都必须带 Bearer；空 token 不发头（回环免密形态）。
+func TestUpstream_SendsServiceToken(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(resultJSON("completed", nil))
+	}))
+	defer srv.Close()
+
+	reader := NewResultReaderWithToken(srv.URL, srv.Client(), " svc-token ")
+	if _, err := reader.GetResult(context.Background(), "run-1"); err != nil {
+		t.Fatalf("GetResult: %v", err)
+	}
+	if len(got) != 1 || got[0] != "Bearer svc-token" {
+		t.Fatalf("want Bearer svc-token, got %v", got)
+	}
+
+	plain := NewResultReader(srv.URL, srv.Client())
+	got = nil
+	if _, err := plain.GetResult(context.Background(), "run-1"); err != nil {
+		t.Fatalf("GetResult: %v", err)
+	}
+	if len(got) != 1 || got[0] != "" {
+		t.Fatalf("empty token must not send Authorization, got %v", got)
+	}
+}
+
 func TestResultReader_EmptyRunID(t *testing.T) {
 	reader := NewResultReader("http://127.0.0.1:1", nil)
 	if _, err := reader.GetResult(context.Background(), "  "); !errors.Is(err, analysis.ErrRunNotFound) {

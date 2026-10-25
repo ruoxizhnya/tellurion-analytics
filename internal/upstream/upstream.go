@@ -45,6 +45,15 @@ func joinURL(base, path string) string {
 	return strings.TrimRight(base, "/") + path
 }
 
+// applyAuth 给上游请求加服务间凭证；token 为空时不发头（回环 + 无 secret
+// 的本地开发仍免密，对应 kit 启动闸的 open-access 形态）。
+func applyAuth(req *http.Request, token string) {
+	if token == "" {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+}
+
 // readErrorBody 取上游错误体的前 512 字节（只用于错误信息，不解析语义）。
 func readErrorBody(r io.Reader) string {
 	b, err := io.ReadAll(io.LimitReader(r, 512))
@@ -64,13 +73,26 @@ func readErrorBody(r io.Reader) string {
 type ResultReader struct {
 	base   string
 	client *http.Client
+	token  string
 }
 
 var _ analysis.ResultReader = (*ResultReader)(nil)
 
-// NewResultReader 构造结果读取适配器；base 是 core 的根 URL。
+// NewResultReader 构造不带凭证的结果读取适配器（回环 + 无 secret 的开发态）。
 func NewResultReader(base string, client *http.Client) *ResultReader {
-	return &ResultReader{base: strings.TrimRight(base, "/"), client: clientOr(client)}
+	return NewResultReaderWithToken(base, client, "")
+}
+
+// NewResultReaderWithToken 构造带服务间凭证的结果读取适配器；base 是 core 的根 URL。
+//
+// core 的 `/api/backtest/{id}/report` 在鉴权闸后面（裁-15）：本仓作为服务
+// 间调用方必须带 Bearer，否则上游配了 secret 时恒 401，所有 run 结果都读不到。
+func NewResultReaderWithToken(base string, client *http.Client, token string) *ResultReader {
+	return &ResultReader{
+		base:   strings.TrimRight(base, "/"),
+		client: clientOr(client),
+		token:  strings.TrimSpace(token),
+	}
 }
 
 // GetResult 按 run_id 读取结果并把 K9 三值映射成领域哨兵。
@@ -83,6 +105,7 @@ func (r *ResultReader) GetResult(ctx context.Context, runID string) (*analysis.B
 	if err != nil {
 		return nil, fmt.Errorf("%w: build result request: %v", analysis.ErrDependencyUnavailable, err)
 	}
+	applyAuth(req, r.token)
 	resp, err := r.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%w: get run result %s: %v", analysis.ErrDependencyUnavailable, runID, err)
@@ -124,13 +147,25 @@ func (r *ResultReader) GetResult(ctx context.Context, runID string) (*analysis.B
 type BenchmarkReader struct {
 	base   string
 	client *http.Client
+	token  string
 }
 
 var _ analysis.BenchmarkReader = (*BenchmarkReader)(nil)
 
-// NewBenchmarkReader 构造基准读取适配器；base 是 tellurion-data 的根 URL。
+// NewBenchmarkReader 构造不带凭证的基准读取适配器（回环 + 无 secret 的开发态）。
 func NewBenchmarkReader(base string, client *http.Client) *BenchmarkReader {
-	return &BenchmarkReader{base: strings.TrimRight(base, "/"), client: clientOr(client)}
+	return NewBenchmarkReaderWithToken(base, client, "")
+}
+
+// NewBenchmarkReaderWithToken 构造带服务间凭证的基准读取适配器；base 是 tellurion-data 的根 URL。
+//
+// data 的 `/datasets/*` 要 viewer 角色（裁-15），service-to-service 必须带 Bearer。
+func NewBenchmarkReaderWithToken(base string, client *http.Client, token string) *BenchmarkReader {
+	return &BenchmarkReader{
+		base:   strings.TrimRight(base, "/"),
+		client: clientOr(client),
+		token:  strings.TrimSpace(token),
+	}
 }
 
 type x1bResolve struct {
@@ -225,6 +260,7 @@ func (r *BenchmarkReader) getJSON(ctx context.Context, endpoint string, dst any)
 	if err != nil {
 		return fmt.Errorf("%w: build request: %v", analysis.ErrBenchmarkDataUnavailable, err)
 	}
+	applyAuth(req, r.token)
 	resp, err := r.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: %v", analysis.ErrBenchmarkDataUnavailable, err)
@@ -247,6 +283,7 @@ func (r *BenchmarkReader) getJSON(ctx context.Context, endpoint string, dst any)
 type ArtifactReader struct {
 	base   string
 	client *http.Client
+	token  string
 }
 
 var (
@@ -254,9 +291,18 @@ var (
 	_ analysis.FactorExposureProvider = (*ArtifactReader)(nil)
 )
 
-// NewArtifactReader 构造 artifact 读取适配器；base 是 artifact 面的根 URL。
+// NewArtifactReader 构造不带凭证的 artifact 读取适配器（回环 + 无 secret 的开发态）。
 func NewArtifactReader(base string, client *http.Client) *ArtifactReader {
-	return &ArtifactReader{base: strings.TrimRight(base, "/"), client: clientOr(client)}
+	return NewArtifactReaderWithToken(base, client, "")
+}
+
+// NewArtifactReaderWithToken 构造带服务间凭证的 artifact 读取适配器；base 是 artifact 面的根 URL。
+func NewArtifactReaderWithToken(base string, client *http.Client, token string) *ArtifactReader {
+	return &ArtifactReader{
+		base:   strings.TrimRight(base, "/"),
+		client: clientOr(client),
+		token:  strings.TrimSpace(token),
+	}
 }
 
 // GetPortfolioSnapshot 读取期末持仓 artifact。
@@ -291,6 +337,7 @@ func (r *ArtifactReader) getJSON(ctx context.Context, runID, kind, missing strin
 	if err != nil {
 		return fmt.Errorf("%w: build %s request: %v", analysis.ErrDependencyUnavailable, kind, err)
 	}
+	applyAuth(req, r.token)
 	resp, err := r.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: get %s: %v", analysis.ErrDependencyUnavailable, kind, err)

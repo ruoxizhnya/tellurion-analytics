@@ -4,7 +4,9 @@
 // 时）→ HTTP 面。未配置的端口保持 nil，对应端点 fail-closed 成
 // 503 dependency_unavailable —— 不伪造结果、不返回空报告。
 //
-// 未接线项（docs/TASKS.md QT-43 施工记录）：PDF 导出（R5 未裁）、鉴权（QT-50 ④）。
+// 未接线项（docs/TASKS.md QT-43 施工记录）：PDF 导出（R5 未裁）。
+// 鉴权与上游服务间凭证已接线（裁-15）：本服务过 kit/httpadapter 启动闸，
+// 调 core / data 时按 -core-token / -data-token 带 Bearer。
 package main
 
 import (
@@ -39,6 +41,14 @@ func main() {
 		"orchestration base URL for X5b parent jobs (empty = SensitivityQueue unwired → 503)")
 	jwtSecret := flag.String("jwt-secret", envFirst("JWT_SECRET", "AUTH_JWT_SECRET"),
 		"JWT secret shared with analysis (empty = open access on loopback only)")
+	// 裁-15：服务间凭证。上游（core / data）上了鉴权闸后，不带 Bearer 恒 401；
+	// 空值 = 上游未开鉴权（回环 + 无 secret 的开发态）。
+	coreToken := flag.String("core-token", envFirst("ANALYTICS_CORE_TOKEN", "CORE_SERVICE_TOKEN"),
+		"service token for core upstream (empty = no Authorization header)")
+	dataToken := flag.String("data-token", envFirst("ANALYTICS_DATA_TOKEN", "DATA_SERVICE_TOKEN"),
+		"service token for tellurion-data upstream (empty = no Authorization header)")
+	artifactToken := flag.String("artifact-token", envFirst("ANALYTICS_ARTIFACT_TOKEN"),
+		"service token for artifact upstream (empty = fall back to -core-token)")
 	exposure := flag.String("insecure-exposure", os.Getenv("AUTH_INSECURE_EXPOSURE"),
 		"explicit exposure declaration for open access on a non-loopback bind (only loopback-published is accepted)")
 	flag.Parse()
@@ -72,14 +82,19 @@ func main() {
 		log.Printf("analyticsservice: WARNING in-memory store (set -dsn / ANALYTICS_DATABASE_DSN to persist analysis.*)")
 	}
 
+	artToken := *artifactToken
+	if artToken == "" {
+		// artifact 面当前挂在 core（R2 owner 未裁）；未单独配就复用 core 凭证。
+		artToken = *coreToken
+	}
 	if *coreURL != "" {
-		opts.Results = upstream.NewResultReader(*coreURL, nil)
+		opts.Results = upstream.NewResultReaderWithToken(*coreURL, nil, *coreToken)
 	}
 	if *dataURL != "" {
-		opts.Benchmarks = upstream.NewBenchmarkReader(*dataURL, nil)
+		opts.Benchmarks = upstream.NewBenchmarkReaderWithToken(*dataURL, nil, *dataToken)
 	}
 	if *artifactURL != "" {
-		artifacts := upstream.NewArtifactReader(*artifactURL, nil)
+		artifacts := upstream.NewArtifactReaderWithToken(*artifactURL, nil, artToken)
 		opts.Holdings = artifacts
 		opts.Factors = artifacts
 	}
