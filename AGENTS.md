@@ -53,7 +53,7 @@ go test ./...
 |---|---|---|
 | `github.com/ruoxizhnya/tellurion-contracts` | **未引入**（实测 2026-10-26：远端最新 `v0.6.0` 与 `origin/main` 的业务包只有 `dataprotocol` / `domain` / `engine` / `fees`，**无 `analysis` 包**） | R1 / R2 的 DTO **owner = 本仓**（裁决 ③，2026-10-25）：DTO 留在 `internal/analysis/model.go`，**不迁 contracts**。触发迁移的条件写死为「core 或 orchestration 出现 import analytics DTO 的 Go 代码」（HTTP 交互不算）——成文见 `docs/api-schema.md` §6.4，守卫 `TestUpstreamContractOwnerStaysLocal` |
 | `github.com/ruoxizhnya/tellurion-kit` | `v0.1.4`（2026-10-25 引入 `v0.1.1`，同日随 kit `KT-11` 升） | 鉴权机制：`auth`（token 解析）+ `auth/httpadapter`（net/http 适配、启动闸、Policy）。本仓只写策略表，不另造 token 校验。**`v0.1.4` 起 `role=service` 的非数字 subject（裁-17 的 `sub=service:<repo>`）不再被 401** ⇒ 服务间调用才真能走到本仓策略表 |
-| `github.com/jackc/pgx/v5` | `v5.11.0` | `analysis.*` 的 PG 连接池与迁移执行（`internal/analysis/pgstore.go`）；选 pgx 而非 `database/sql` 驱动是为了直接拿 `pgxpool` 与 `pgtype` 的 NULL 语义 |
+| `github.com/jackc/pgx/v5` | `v5.11.0` ⚠️ **分叉已登记** | `analysis.*` 的 PG 连接池与迁移执行（`internal/analysis/pgstore.go`）；选 pgx 而非 `database/sql` 驱动是为了直接拿 `pgxpool` 与 `pgtype` 的 NULL 语义。**本仓是全组里最高的 pgx，别按别的仓那句「与 core 对齐」推断**：2026-10-26 实测 core / kit / data / strategy / agent / orchestration / broker 七仓 = `v5.7.3`，risk = `v5.7.5`，**本仓 = `v5.11.0`**。三档并存不是同一把刀——跨仓抄 `pgxpool` / `pgtype` 用法前先核目标仓版本；统一到一档要单独立单，不在顺手 `go get -u` 里做 |
 
 > `go.mod` 现在有两条直接依赖：`pgx v5.11.0`（2026-10-24，施工 ②）与 `tellurion-kit v0.1.4`（2026-10-25 W3 鉴权接线时是 `v0.1.1`，同日随 kit `KT-11` 升）。**contracts 零依赖，且不打算引入**——DTO owner 已裁 = 本仓（裁决 ③）；真要迁的那天，触发条件见 `docs/api-schema.md` §6.4。
 >

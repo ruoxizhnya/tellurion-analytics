@@ -44,7 +44,7 @@ verified-by: H6（R2 owner 落本仓 + 触发条件成文于 api-schema §6.4；
 - **③ 要求**：先确认消费者（core 报告面或 UI）；core 加 HTTP 客户端；同一 run 的本仓结果与 core 现有结果对拍；切读后删 core `pkg/backtest/metrics` / `reporting` 的重复实现（保留引擎自用最小面）。
 - **④ 约束与非目标**：不在没有消费者时宣称 G3；不搬回测引擎；不把 `analysis.*` 表迁回 core。
 - **⑤ 验收**：core/UI 至少一条真实调用链；同 run 指标一致；core 重复实现删除；`analysis.*` 唯一 writer 是本仓。
-- **⑥ 边界**：本仓只保证读侧计算；core 删除由 `SVC-CORE-AN-RETIRE` 跟踪。
+- **⑥ 边界**：本仓只保证读侧计算；core 代码删除归 **`SVC-CORE-AN-RETIRE`** 跟踪——⚠️ 该 ID 今天**只有名字没有六字段单**：core 台账 `docs/TASKS.md:24` 的「退役单 ID」表列名 + 机械判据正文在 `tellurion:docs/design/qt-decoupling/core-governance-decision-materials-2026-10-26.md` §4.5，且 core 台账 `:26` 明写「七个退役 ID 不再各自立单」。**按 §4.5 的判据开工；真立单前本仓不宣称退役可执行。**
 
 > **⛔ 开工前置复核（2026-10-26，未开工）**：
 > - **无消费方，停写条件不成立**：audit P0-2 实测 core **零调用方**，core 仍在 `cmd/analysis` 直接算指标/报告；没有消费者就无法按 ④「不在没有消费者时宣称 G3」开工。
@@ -184,7 +184,11 @@ verified-by: H6（R2 owner 落本仓 + 触发条件成文于 api-schema §6.4；
 > 升的理由不是「策略表要用 `service` 角色」（`Authorize` 是角色串精确 any-of，`v0.1.1` 就够），而是**同一条 token 过不过得了 `Authenticate`**：
 > `v0.1.1` 无条件要求 `claims.UserIDInt64()`，而裁-17 口径的 `sub=service:<repo>` 非数字 ⇒ 服务 token 在进入本仓策略表之前就 401。
 > 本仓守卫用例用 `IssueTokens` 签**数字 subject** + `role=service`，因此它当时绿、并不能证明生产形状走得通——详见「QT-43 未落项」第 2 条。
-> **本轮验收边界**：本机无 Go 工具链（`go` 不在 PATH），上述 `go build/vet/test` 结论**未在本机复跑**；升 pin 这笔的证据取 CI 退出码。
+> **本轮验收边界**：写这笔时本机无 Go 工具链（`go` 不在 PATH），上述 `go build/vet/test` 结论**未在本机复跑**；升 pin 这笔的证据取 CI 退出码。
+> ⚠️ **2026-10-26 复测订正**：「无 Go 工具链」已不成立——Go **1.25.14 装了**，只是不在默认 Git Bash 的 PATH（`command -v go` 空），
+> `export PATH="/c/Users/ruoxi/AppData/Local/Programs/go1.25.14/bin:$PATH"` 后就能本机复跑；本仓今天的真实限制是
+> **PG（5432 零监听）与 `-race`（CGO_ENABLED=0）**，不是编译器缺失。统一环境口径见
+> `tellurion:docs/design/qt-decoupling/cross-repo-decision-record-2026-10-26.md` §三，别再各仓各写一份。
 
 **未落（本单仍 🔶）**
 
@@ -366,6 +370,33 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 > ① ~~**M5 已结案（2026-10-21）** → `tellurion:docs/design/qt-decoupling/repo-inventory.md` §1.2：**六仓 ≠ 六进程**，本仓今天不升格容器~~ → **已被 ADR-036（2026-10-26）取代**：本仓定位为服务，G0 补 `Dockerfile + deploy`；G1~G4 按就绪门推进。旧 M5 记录保留作历史。
 > ② **M8 接口对表已落（2026-10-22）** → 本仓 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9（模板 = `tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §4.1；**本行原指的 `target-module-topology.md` UnifiedDataPoint 节是幻影引用，已订正**）。
 > 正文以 core 彼处为准，此处只留指针、不镜像。
+
+### SVC-AN-G1 · 服务就绪门 G1：版本化 · 错误模型闭合 · 幂等 · 分页 · 就绪探针（ADR-036）[P1] ⬜
+
+- **① 目标**：本仓 8 条端点补齐 ADR-036 §3 的 G1 五件（版本化 API / 错误模型 / 鉴权 / 幂等 / 分页·限流），其中鉴权已落、其余四件今天没有判据。
+- **② 上下文**：8 条路由实测（`POST /api/analysis/{metrics,benchmark,attribution,sensitivity,montecarlo,correlation}` + `GET /api/analysis/reports/{id}` + `GET .../reports/{id}/export`），全部过鉴权闸（`auth.go` = kit `v0.1.4` 适配、`policy.go` = 策略表，`service` 角色已入表，ADR-0004）；`/healthz` 已随 `f010606` 修好（G0 缺口关闭）；**`/readyz` 全 workspace 代码 0 命中**；实测本仓无 openapi 文件、无分页参数（`limit`/`offset` 0 命中）、无限流；`mc_runs.seed` 必填已是既有约束（幂等的一部分）。**DTO 归属已裁**（裁决 ③：owner = 本仓，`internal/analysis/model.go` 不迁 contracts，触发条件 = core / orchestration 出现 import 本仓 DTO 的 Go 代码；守卫 `TestUpstreamContractOwnerStaysLocal`）⇒ 本单**不**以「进契约」为验收。
+- **③ 要求**：① `/readyz`：PG 池可连 + `analysis.*` 迁移已执行 + 上游端口已装配（未配置上游时 `/readyz` 应是 **503** 而不是 200——「进程活着」与「能出报告」是两件事，`/healthz` 已承担前者）；② 错误模型闭合：把「未配置上游 ⇒ 503 `dependency_unavailable`」「输入缺 `holdings`/`factor_exposures` ⇒ 不完整」「缺 `seed` ⇒ 拒绝」「上游 4xx ⇒ 折成本仓哪个码」逐条列进 `api-schema.md`，未列出的视为缺陷；③ 幂等：同一 `(run_id, input_hash)` 的重复 `POST` 返回同一报告 id 还是新建，写死并有用例；④ 分页：`GET /reports` 族（若有列表面）给 `limit`/`cursor`，无列表面则在 `api-schema.md` 显式声明「本仓只有按 id 取回，列表归 UI/core」；⑤ 版本化与兼容策略一行（加字段 MINOR / 改语义 MAJOR）+ `api-schema.md` §6.4 的 DTO 迁移触发条件保持可反查；⑥ 限流按「不打挂自己」量级，429 与 401/403 可区分，探针豁免。
+- **④ 约束与非目标**：不把 DTO 迁进 contracts（裁决 ③ 未触发）；不读上游表（只经 HTTP 端口）；不自建 openapi 生成管线（那是 §4 of `tellurion-contracts:docs/design/shape-packages-decision-material.md` 的口径题，未裁）；不改指标公式（指标不得重算 = F5 约束）；不引新依赖。
+- **⑤ 验收**：① `/readyz` 三条用例（无 PG → 503、PG 可用但未配上游 → 503 且报文点名缺哪个上游、两者齐 → 200）；② 幂等用例：同输入两次 `POST` ⇒ 断言预期行为（同 id 或明确 409），破坏验证：去掉 input_hash 复用逻辑 ⇒ 红；③ 错误码表逐条对得上实现（抽 3 条）；④ 429 与 401 可区分 + 探针豁免用例；⑤ `go build/vet/test ./...` 三条绿（贴真实退出码）。
+- **⑥ 边界**：本仓接口面；归因输入的生产者不在本仓（见 `tellurion:QT-78`，本仓只做「拿不到就 fail-closed」的消费端）；core 指标实现的退役归 `tellurion:SVC-CORE-AN-RETIRE`。
+
+### SVC-AN-G2 · 服务就绪门 G2：`analysis.*` 唯一 writer 与可重放迁移（ADR-036）[P1] ⬜
+
+- **① 目标**：五张 `analysis.*` 表在本仓自证「只有我写、迁移可重放」，并把「谁真的在写 `benchmarks`」这条空账填成有答案的行。
+- **② 上下文**：`internal/analysis/pgstore.go` 有 PG 实现与 `analysis.*` DDL，`ANALYTICS_TEST_DSN` 腿可选跑；**实测写面存在但生产调用为零**：`pgstore.go:196` 有 `INSERT INTO analysis.benchmarks`，而 core 侧材料 §4.5 明写「analytics 的 `analysis.benchmarks` 写方法生产零调用 ⇒ 先要有真写者」（本仓台账亦登记基准面依赖 X1b）⇒ 「唯一 writer」当前是**唯一 = 零**，与 ADR-036 §5.2 的「一个 schema 只有一个 owner」不冲突但与「有数据」冲突，必须在 `db-schema.md` 里写明；本仓对上游只读（AGENTS §3 硬约束）。
+- **③ 要求**：① 迁移重放自证：同一测试库连跑两次 DDL，行数 / `pg_indexes` / 列集指纹逐位不变（无库 skip，不是 fail）；② 禁跨 schema 写护栏：静态扫本仓 SQL，只允许 `analysis.` 的写语句，出现 `quant.` / `market.` / `run.` / `risk.` 即红（这条把 AGENTS §3「禁止写上游客户」从口头变成机器）；③ `benchmarks` 的写者处置三选一并定死：接 X1b 的基准数据 / 由 UI 手工登记 / 显式声明「表已建、暂不启用」，并把结论写进 `db-schema.md`；④ 每张表的「谁写 / 谁读 / 生命周期」成文（报告是否保留、有无保留期——与 `tellurion:SVC-RETIRE-INDEX` 的 90 天保留期裁决同族，本仓需给自己一个数）。
+- **④ 约束与非目标**：不 `DROP` 表；不改上游任何 schema；不为「有写者」而造假数据；不把 `analysis.*` 的报告内容塞进 core 的 `backtest_jobs`；不在本单接归因输入生产者。
+- **⑤ 验收**：① 重放腿两次指纹逐位相同（贴输出）；② 破坏验证：往本仓任一 SQL 常量加一行 `UPDATE quant.portfolio_snapshots` ⇒ 护栏红、还原复绿；③ `benchmarks` 的处置有落档且与 `db-schema.md` 一致；④ 保留期数值成文；⑤ 三条命令绿。
+- **⑥ 边界**：本仓 schema 自证；上游写者与切读归 core / orchestration 各自单。
+
+### SVC-AN-G4 · 服务就绪门 G4：纯函数口径 · 上游失败语义 · runbook（ADR-036）[P1] ⬜
+
+- **① 目标**：把「本仓可复现」与「上游挂了会怎样」两件事写成可核对文档并演练一次——本仓的设计承诺是**纯函数**，这条承诺今天没有运维面支撑。
+- **② 上下文**：SYSTEM-DESIGN §4 批量/分析行的关键约束原文：「分析**纯函数**（不读时钟、不读随机，蒙特卡洛必须带 `seed`）」；上游端口未配置时 fail-closed 成 503 `dependency_unavailable`（已落）；`/healthz` 已 200；**缺 `/readyz`（属 G1）、缺超时/重试口径、缺 runbook**（全 workspace `runbook` 只出现在 ADR-036 正文）；出站三条 reader（Result / Benchmark / Artifact）都要求带 Bearer（`internal/upstream/upstream_test.go` 已钉），但超时上界与「上游 5xx 时是否重试」无文档。
+- **③ 要求**：① 纯函数不变量的**机械守卫**：静态扫描本仓计算包，出现 `time.Now()` / `rand.` 即红（`seed` 必须显式传入），把 SYSTEM-DESIGN 那句设计约束变成 CI 判据；② 失败语义表：上游 401 / 404（run 不存在）/ 409（结论未就绪）/ 503（上游自身未配）/ 超时五类，各给本仓返回码与是否重试；③ 出站请求给显式超时上界（core 侧 AUD-56 的同型坑：无 `CommandContext` 的子进程挂 601s；本仓是同一条教训的 HTTP 版）；④ 报告体生命周期与保留期（与 `SVC-AN-G2` ④ 同一个数）；⑤ `docs/runbook.md`：起停、看日志、重放迁移、`ANALYTICS_TEST_DSN` 集成腿怎么跑、上游不可达时的排查顺序；⑥ 一次演练：断开上游 ⇒ 本仓返回 503 且**不产出半成品报告**；恢复后同输入两次结果逐位一致（这条同时兑现 ①）。
+- **④ 约束与非目标**：不引 APM；不做高可用/多副本；不把随机性引入（要引入必须带 seed）；不改上游；不在本单实现归因输入生产端。
+- **⑤ 验收**：① 纯函数守卫红/绿各一次（破坏验证：临时加一处 `time.Now()` ⇒ 红，还原 ⇒ 绿）；② 失败语义表五类各有用例或注明原因；③ 超时用例：注入永不响应的假上游 ⇒ 到上界即失败且有码（去掉上界 ⇒ 红）；④ 演练记录有真退出码，且「同输入两次逐位一致」有输出；⑤ runbook 每条命令当场执行；⑥ 三条命令绿。
+- **⑥ 边界**：本仓运维面与不变量守卫；凭证分发归 `tellurion:QT-77`，上游实现归各自仓。
 
 ## 施工序（候选单，开工前必须展开成六字段）
 
