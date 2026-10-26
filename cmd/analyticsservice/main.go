@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -111,13 +112,39 @@ func main() {
 	tokens := auth.NewTokenService(auth.Config{JWTSecret: startup.Secret})
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           httpapi.New(svc, httpapi.WithAuthorizer(httpapi.NewAuthorizer(tokens))).Handler(),
+		Handler:           newMux(httpapi.New(svc, httpapi.WithAuthorizer(httpapi.NewAuthorizer(tokens))).Handler()),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("analyticsservice: listening on %s (auth=%t)", *addr, tokens.Enabled())
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("analyticsservice: %v", err)
 	}
+}
+
+// healthzPath 是进程健康探针（Dockerfile / compose 的 HEALTHCHECK 消费）。
+//
+// 它挂在 httpapi 之外：探针必须无凭证可用，也不属于 docs/api-schema.md 的
+// 8 个分析端点契约。只报「进程在监听」，不报上游依赖状态——上游未接线是
+// fail-closed 503，不是进程不健康。
+const healthzPath = "/healthz"
+
+// newMux 把公开探针与业务 HTTP 面拼起来。抽出来是为了能测：进程装配里
+// 「探针确实注册了」不是一个能靠读代码断言的事实。
+func newMux(api http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/", api)
+	// 不用 method pattern：带兜底 "/" 时，未匹配的方法会落到 API 而不是 405。
+	// 探针自己判方法，避免 POST /healthz 被业务面（可能带鉴权）接走。
+	mux.HandleFunc(healthzPath, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fmt.Fprintln(w, "ok")
+	})
+	return mux
 }
 
 // bindHost 从 -addr 取绑定主机；取不到端口时原样当主机比（空 = 全网卡）。

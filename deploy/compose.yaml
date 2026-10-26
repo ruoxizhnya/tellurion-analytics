@@ -1,0 +1,31 @@
+# tellurion-analytics · 单仓本地运行（ADR-036 G0）
+# 用法：docker compose -f deploy/compose.yaml up --build
+# 依赖：本机或容器可达的 PostgreSQL（默认 host.docker.internal:5432）。
+# 上游 URL 在单仓模式下默认指向宿主；聚合 compose 会覆盖为服务名。
+name: tellurion-analytics
+
+services:
+  analytics:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: tellurion-analytics:dev
+    command: ["-addr", "0.0.0.0:8087"]
+    ports:
+      - "127.0.0.1:8087:8087"
+    environment:
+      ANALYTICS_DATABASE_DSN: ${ANALYTICS_DATABASE_DSN:-postgres://postgres:postgres@host.docker.internal:5432/tellurion?sslmode=disable}
+      ANALYTICS_CORE_URL: ${ANALYTICS_CORE_URL:-http://host.docker.internal:8085}
+      ANALYTICS_DATA_URL: ${ANALYTICS_DATA_URL:-http://host.docker.internal:8081}
+      ANALYTICS_ARTIFACT_URL: ${ANALYTICS_ARTIFACT_URL:-http://host.docker.internal:8088}
+      ANALYTICS_ORCHESTRATION_URL: ${ANALYTICS_ORCHESTRATION_URL:-http://host.docker.internal:8088}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8087/healthz"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped

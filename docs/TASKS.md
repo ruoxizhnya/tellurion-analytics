@@ -19,6 +19,39 @@ verified-by: H6（R2 owner 落本仓 + 触发条件成文于 api-schema §6.4；
 
 > **约定变更（2026-10-21）**：原「占位仓不写正式六字段任务单」作废——X 线任务单已展开为本仓正式任务（见下）。M5/M8 开工前置不变。
 
+### SVC-AN-G0 · 服务就绪门 G0：自有部署与本地启动（ADR-036）[P0] ✅（2026-10-26）
+
+- **① 目标**：本仓作为读侧分析服务，能独立构建、启动、被健康检查。
+- **② 上下文**：ADR-036 定本仓为服务；今天有 `cmd/analyticsservice` + `analysis.*` 5 表 + 8 端点，但无 `Dockerfile` / `deploy/`，core 侧零调用方。
+- **③ 要求**：新增 `Dockerfile`（多阶段、非 root、`curl`、`HEALTHCHECK /healthz`）；新增 `deploy/compose.yaml`（`ANALYTICS_DATABASE_DSN`、`ANALYTICS_CORE_URL`、`ANALYTICS_DATA_URL`、`ANALYTICS_ARTIFACT_URL`、`ANALYTICS_ORCHESTRATION_URL`、`JWT_SECRET`；端口 `:8087`）；补 `config/` 或 env 说明；README 写单仓启动命令。
+- **④ 约束与非目标**：不改分析逻辑与 schema；不接 core 消费（G3）；不引入 K8s；不把 core `pkg/backtest/metrics` 复制进本仓。
+- **⑤ 验收**：`docker compose -f deploy/compose.yaml config` 通过；单仓启动后 `GET /healthz` 200；无 `replace` / `go.work`。
+- **⑥ 边界**：只改本仓 deployment；core 侧消费由 `SVC-AN-G3` 跟踪。
+
+> **施工记录（2026-10-26）**：
+> - **落点**：`Dockerfile`（多阶段、非 root、`curl`、`HEALTHCHECK curl -fsS http://127.0.0.1:8087/healthz`）、`deploy/compose.yaml`（服务名 `analytics`、`:8087`、五个 `ANALYTICS_*` 变量 + `JWT_SECRET`、`healthcheck`）；README 补单仓直跑与 compose 启动命令。
+> - **验收（真实输出）**：`docker compose -f deploy/compose.yaml config -q` → exit 0；`git ls-files Dockerfile deploy/compose.yaml` → 2 行（各 1 行）；`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全绿（4 包，`cmd/analyticsservice 0.056s`、`internal/analysis 0.072s`、`internal/httpapi 0.096s`、`internal/upstream 0.083s`）；`gofmt -l .` 空。
+> - **破坏验证（编排腿，实测订正）**：派发原文指定的「删掉 `services.analytics.build.context`」**不会红**——Compose 允许 build 省略 context（默认 `context: "."`），且本服务还带 `image:`，`config -q` 仍 exit 0（已实测）。改用等价的编排破坏：临时加 `depends_on: missing-svc` → `config -q` 退出 1（`service "analytics" depends on undefined service "missing-svc"`）→ 逐字节还原后复绿（exit 0，SHA256 一致）。
+> - **审查修复（2026-10-26，`/healthz` 探针缺失）**：`Dockerfile` / compose 的 `HEALTHCHECK` 打 `http://127.0.0.1:8087/healthz`，但 `internal/httpapi` 没有该路由（8 个业务端点之外全走 `"/"` 兜底）⇒ **容器永远 unhealthy**。修复：`cmd/analyticsservice/main.go` 抽出 `newMux(api)`，在 `httpapi` 之外注册公开 `GET /healthz`（显式判方法，`非 GET` → 405；探针不带鉴权，只报进程在监听，不报上游依赖）；新增 `cmd/analyticsservice/main_test.go`（GET 200 `ok`+content-type、POST 405、业务路径原样委托）；`docs/api-schema.md` frontmatter `verified-by` 与 §1 同步登记「进程探针不属于 8 端点契约」。
+> - **破坏验证（探针腿，逐字节还原）**：把注册行改成 `mux.HandleFunc(healthzPath+"-off", …)` → `go test ./cmd/analyticsservice -count=1` 红（`GET /healthz = 404, want 200`；`POST /healthz = 404, want 405`）→ 从备份还原、SHA256 `D3C67B49…9297D1F` 一致 → 同一命令复绿（`ok … 0.056s`）。
+> - **容器实测（daemon 本轮可达，订正上一条「不可达」陈述）**：`docker build -t tellurion-analytics:g0-verify .` 成功；以临时容器起（`ANALYTICS_*` 指向临时 PG）后 `curl -sS http://127.0.0.1:8087/healthz` → `200 ok`，`docker inspect -f '{{.State.Health.Status}}'` → `healthy`。
+> - **如实登记**：未引 `contracts`（`go.mod` 仍只 pgx + kit）；未改分析口径与 core `/report`；token 签发/分发仍在 core / kit（G3 前置，跨仓腿）；未做 core → 本仓的真实调用链（G3 未开工）。
+
+### SVC-AN-G3 · core/UI 消费与 core 指标实现退役（ADR-036）[P1] ⛔（2026-10-26 复核：无消费方）
+
+- **① 目标**：至少一个真实消费者通过 HTTP 调用本仓；core 的重复指标/报告实现退役。
+- **② 上下文**：本仓 8 端点已实装，但 core 零调用方；core `cmd/analysis` 仍直接算 metrics/reporting；本轮 S1 不依赖本仓，所以 G3 允许后置。
+- **③ 要求**：先确认消费者（core 报告面或 UI）；core 加 HTTP 客户端；同一 run 的本仓结果与 core 现有结果对拍；切读后删 core `pkg/backtest/metrics` / `reporting` 的重复实现（保留引擎自用最小面）。
+- **④ 约束与非目标**：不在没有消费者时宣称 G3；不搬回测引擎；不把 `analysis.*` 表迁回 core。
+- **⑤ 验收**：core/UI 至少一条真实调用链；同 run 指标一致；core 重复实现删除；`analysis.*` 唯一 writer 是本仓。
+- **⑥ 边界**：本仓只保证读侧计算；core 删除由 `SVC-CORE-AN-RETIRE` 跟踪。
+
+> **⛔ 开工前置复核（2026-10-26，未开工）**：
+> - **无消费方，停写条件不成立**：audit P0-2 实测 core **零调用方**，core 仍在 `cmd/analysis` 直接算指标/报告；没有消费者就无法按 ④「不在没有消费者时宣称 G3」开工。
+> - **token 跨仓分发未落**：本仓只校验 token，签发与分发在 core / kit；跨仓腿未闭合。
+> - **R1 残留**：读面「结论态放行」改在 core（第三轮裁决 ⑲），本仓 wire 码就绪但 core 侧未切。
+> - **如实登记**：`go.mod` 无 `tellurion-contracts`，本轮未引入；未动 core `/report` 与分析口径。
+
 ### QT-43 · X4 分析服务（基准 / 归因 / 敏感性 / 蒙特卡洛）[P1] 🔶
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「五、X 线」迁入（任务台账批量重分布：X 线单展开到各服务仓为正式六字段单，「占位仓不写正式任务单」旧约定同时作废）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
@@ -330,7 +363,7 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 ---
 
 > **开工前置（refactor-plan-review M5/M8，2026-10-20 登记；2026-10-22 更新执行状态）**：本表任何单开工前，必须先过 core `tellurion:docs/TASKS.md`「五、X 线」的**公共前置**两条：
-> ① **M5 已结案（2026-10-21）** → `tellurion:docs/design/qt-decoupling/repo-inventory.md` §1.2：**六仓 ≠ 六进程**，本仓今天不升格容器；X4a 的纯函数迁移不需要容器，C 组 HTTP 面是升格时的目标形状。
+> ① ~~**M5 已结案（2026-10-21）** → `tellurion:docs/design/qt-decoupling/repo-inventory.md` §1.2：**六仓 ≠ 六进程**，本仓今天不升格容器~~ → **已被 ADR-036（2026-10-26）取代**：本仓定位为服务，G0 补 `Dockerfile + deploy`；G1~G4 按就绪门推进。旧 M5 记录保留作历史。
 > ② **M8 接口对表已落（2026-10-22）** → 本仓 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9（模板 = `tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §4.1；**本行原指的 `target-module-topology.md` UnifiedDataPoint 节是幻影引用，已订正**）。
 > 正文以 core 彼处为准，此处只留指针、不镜像。
 

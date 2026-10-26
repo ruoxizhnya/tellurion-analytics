@@ -29,6 +29,9 @@ ANALYTICS_CORE_URL='http://127.0.0.1:8085' \
 ANALYTICS_DATA_URL='http://127.0.0.1:8081' \
 ANALYTICS_ORCHESTRATION_URL='http://127.0.0.1:8088' \
 go run ./cmd/analyticsservice -addr 127.0.0.1:8087
+
+# 或容器（单仓 compose；PG 与上游地址默认指向宿主）
+docker compose -f deploy/compose.yaml up --build
 ```
 
 本仓**单独 checkout 就能跑通**上面三条。需要别的仓源码才过 → 边界错了，不是加 `replace` 能解决的问题。
