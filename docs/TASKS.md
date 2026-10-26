@@ -44,7 +44,7 @@ verified-by: H6（R2 owner 落本仓 + 触发条件成文于 api-schema §6.4；
 - **③ 要求**：先确认消费者（core 报告面或 UI）；core 加 HTTP 客户端；同一 run 的本仓结果与 core 现有结果对拍；切读后删 core `pkg/backtest/metrics` / `reporting` 的重复实现（保留引擎自用最小面）。
 - **④ 约束与非目标**：不在没有消费者时宣称 G3；不搬回测引擎；不把 `analysis.*` 表迁回 core。
 - **⑤ 验收**：core/UI 至少一条真实调用链；同 run 指标一致；core 重复实现删除；`analysis.*` 唯一 writer 是本仓。
-- **⑥ 边界**：本仓只保证读侧计算；core 代码删除归 **`SVC-CORE-AN-RETIRE`** 跟踪——⚠️ 该 ID 今天**只有名字没有六字段单**：core 台账 `docs/TASKS.md:24` 的「退役单 ID」表列名 + 机械判据正文在 `tellurion:docs/design/qt-decoupling/core-governance-decision-materials-2026-10-26.md` §4.5，且 core 台账 `:26` 明写「七个退役 ID 不再各自立单」。**按 §4.5 的判据开工；真立单前本仓不宣称退役可执行。**
+- **⑥ 边界**：本仓只保证读侧计算；core 代码删除归 **`SVC-CORE-AN-RETIRE`** 跟踪——条目**已在 core 立单**（2026-10-26 同日补，`tellurion:docs/TASKS.md:148`「六之二、退役执行单」，串行第 8；判据 = B 组材料 §4.5）。⚠️ core 台账 `:26` 那句「不再各自立单」已在同日被 `:28` 推翻，别按旧句判断「这单不存在」。
 
 > **⛔ 开工前置复核（2026-10-26，未开工）**：
 > - **无消费方，停写条件不成立**：audit P0-2 实测 core **零调用方**，core 仍在 `cmd/analysis` 直接算指标/报告；没有消费者就无法按 ④「不在没有消费者时宣称 G3」开工。
