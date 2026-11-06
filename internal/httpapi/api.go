@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,11 +21,37 @@ const MaxBodyBytes = 1 << 20
 type Server struct {
 	svc        *analysis.Service
 	authorizer Authorizer
+	readiness  ReadinessFunc
+	limiter    *rateLimiter
 	mux        *http.ServeMux
 }
 
-// Option 按需装配可选面（当前只有鉴权闸）。
+// Option 按需装配可选面（鉴权闸 / 就绪判定 / 限流参数）。
 type Option func(*Server)
+
+// ReadinessReport 是 /readyz 的一次判定结果。
+//
+// Store 取 "postgres" / "memory"：分析服务在 memory 模式下也能起进程，但
+// 「能出报告」要求结果落 analysis.*，所以 memory 恒不就绪（503）。
+// Missing 点名未装配的上游端口（results / benchmarks / holdings / factors / queue）。
+type ReadinessReport struct {
+	Store   string
+	Missing []string
+	Err     error
+}
+
+// ReadinessFunc 由进程装配提供：PG 可连 + analysis.* 已迁移 + 上游端口装齐。
+type ReadinessFunc func(ctx context.Context) ReadinessReport
+
+// WithReadiness 装配 /readyz 的判定。未装配 ⇒ /readyz 恒 503（fail-closed）。
+func WithReadiness(f ReadinessFunc) Option {
+	return func(s *Server) { s.readiness = f }
+}
+
+// WithRateLimit 覆盖默认令牌桶（默认 50 rps / burst 200；测试与容量调参用）。
+func WithRateLimit(perSecond, burst int) Option {
+	return func(s *Server) { s.limiter = newRateLimiter(perSecond, burst) }
+}
 
 // routeSpec 是「注册模式 + handler」；路由表与 policy 表由守卫测试双向对拍。
 type routeSpec struct {
@@ -55,20 +82,61 @@ func (s *Server) routePatterns() []string {
 	return out
 }
 
-// New 构造 Server 并注册路由。每个路由都挂 requireAuth（未装配 Authorizer → 503）。
+// New 构造 Server 并注册路由。每个业务路由都挂 requireAuth（未装配 Authorizer → 503）；
+// /readyz 是部署探针，直接注册、不鉴权不限流（见 readyz）。
 func New(svc *analysis.Service, opts ...Option) *Server {
-	s := &Server{svc: svc, mux: http.NewServeMux()}
+	s := &Server{
+		svc:     svc,
+		limiter: newRateLimiter(defaultRatePerSecond, defaultRateBurst),
+		mux:     http.NewServeMux(),
+	}
 	for _, opt := range opts {
 		opt(s)
 	}
 	for _, spec := range s.routes() {
 		s.mux.Handle(spec.pattern, s.requireAuth(spec.handler))
 	}
+	s.mux.HandleFunc("GET /readyz", s.readyz)
 	return s
 }
 
 // Handler 返回 HTTP handler。
 func (s *Server) Handler() http.Handler { return s.mux }
+
+// readyBody 是 /readyz 的响应体（部署面契约，不属于 8 个分析端点）。
+type readyBody struct {
+	Status  string   `json:"status"`
+	Store   string   `json:"store"`
+	Missing []string `json:"missing,omitempty"`
+	Error   string   `json:"error,omitempty"`
+}
+
+// readyz 判定「能出报告」而不是「进程活着」：/healthz 承担后者。
+//
+// 三种未就绪：未装配判定（store=unwired）/ 持久层不可用（Err）/ 上游端口缺失
+// （Missing 点名）。memory Store 不算就绪——结果不落 analysis.*，重启即丢失。
+func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
+	if s.readiness == nil {
+		writeJSON(w, http.StatusServiceUnavailable, readyBody{
+			Status:  "not_ready",
+			Store:   "unwired",
+			Missing: []string{"store"},
+		})
+		return
+	}
+	report := s.readiness(r.Context())
+	body := readyBody{Status: "not_ready", Store: report.Store, Missing: report.Missing}
+	if report.Err != nil {
+		body.Error = report.Err.Error()
+	}
+	if report.Err == nil && report.Store == "postgres" && len(report.Missing) == 0 {
+		body.Status = "ready"
+		body.Missing = nil
+		writeJSON(w, http.StatusOK, body)
+		return
+	}
+	writeJSON(w, http.StatusServiceUnavailable, body)
+}
 
 type errorBody struct {
 	Error string `json:"error"`

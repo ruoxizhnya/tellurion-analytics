@@ -59,6 +59,30 @@ func New(opts Options) (*Service, error) {
 	}, nil
 }
 
+// MissingUpstreams 返回未装配的上游端口名，供 /readyz 点名缺失依赖。
+//
+// 顺序固定（results / benchmarks / holdings / factors / queue），便于运维按
+// 启动 flag 逐项补齐；空切片 = 四个上游 URL 都已配置。
+func (s *Service) MissingUpstreams() []string {
+	var out []string
+	if s.results == nil {
+		out = append(out, "results")
+	}
+	if s.benchmarks == nil {
+		out = append(out, "benchmarks")
+	}
+	if s.holdings == nil {
+		out = append(out, "holdings")
+	}
+	if s.factors == nil {
+		out = append(out, "factors")
+	}
+	if s.queue == nil {
+		out = append(out, "queue")
+	}
+	return out
+}
+
 // Metrics 计算绩效指标（F5：from_result 原样 + 只补算缺失项）。
 func (s *Service) Metrics(ctx context.Context, runID string) (Report, error) {
 	if strings.TrimSpace(runID) == "" {

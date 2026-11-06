@@ -67,8 +67,10 @@ func main() {
 	defer cancel()
 
 	opts := analysis.Options{Executor: analysis.AsyncExecutor{}}
+	var pg *analysis.PG
 	if *dsn != "" {
-		pg, err := analysis.OpenPG(ctx, *dsn)
+		var err error
+		pg, err = analysis.OpenPG(ctx, *dsn)
 		if err != nil {
 			log.Fatalf("analyticsservice: %v", err)
 		}
@@ -109,10 +111,33 @@ func main() {
 	if err != nil {
 		log.Fatalf("analyticsservice: %v", err)
 	}
+	// 就绪判定（SVC-AN-G1）：/healthz 只说进程在监听；/readyz 要求
+	// 「PG 可连 + analysis.* 已迁移 + 四个上游端口装齐」。memory 模式恒 503——
+	// 结果不落 analysis.*，进程活着不等于能出报告。
+	var readiness httpapi.ReadinessFunc
+	if pg != nil {
+		readiness = func(ctx context.Context) httpapi.ReadinessReport {
+			if err := pg.Ready(ctx); err != nil {
+				return httpapi.ReadinessReport{Store: "postgres", Err: err}
+			}
+			return httpapi.ReadinessReport{Store: "postgres", Missing: svc.MissingUpstreams()}
+		}
+	} else {
+		readiness = func(context.Context) httpapi.ReadinessReport {
+			return httpapi.ReadinessReport{
+				Store:   "memory",
+				Missing: []string{"store: postgres (set -dsn / ANALYTICS_DATABASE_DSN)"},
+			}
+		}
+	}
 	tokens := auth.NewTokenService(auth.Config{JWTSecret: startup.Secret})
 	srv := &http.Server{
-		Addr:              *addr,
-		Handler:           newMux(httpapi.New(svc, httpapi.WithAuthorizer(httpapi.NewAuthorizer(tokens))).Handler()),
+		Addr: *addr,
+		Handler: newMux(httpapi.New(
+			svc,
+			httpapi.WithAuthorizer(httpapi.NewAuthorizer(tokens)),
+			httpapi.WithReadiness(readiness),
+		).Handler()),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("analyticsservice: listening on %s (auth=%t)", *addr, tokens.Enabled())

@@ -26,10 +26,12 @@ verified-by: R1 换面（读取边 `ResultReader` = core 持久读面；队列�
 
 ## 2. 关键时序
 
-0. **鉴权闸**（2026-10-25 接线，2026-10-26 加 `service` 档）：每个请求先过 `requireAuth`——未装配 Authorizer → 503 `auth_unavailable`，
+0. **鉴权闸 → 限流**（2026-10-25 接线，2026-10-26 加 `service` 档，2026-11-07 加按身份限流）：每个业务请求先过 `requireAuth`——未装配 Authorizer → 503 `auth_unavailable`，
    无凭证 / 坏 token → 401，角色不足 → 403；6 个 POST 需 `trader` 及以上（+ admin + **service**），2 个 GET 需 `viewer` 及以上（+ trader + admin + **service**）。
+   鉴权通过后按身份令牌桶限流（默认 50 rps / burst 200），超限 429 `rate_limited` + `Retry-After: 1`——顺序固定，故 401/403 与 429 可区分。
    `service` 是**服务间**角色（core 代机器调本仓用，ADR-0004）：本仓 8 条端点全是分析计算 / 报告读取，没有审批 / 留痕 / 配置 / 交易面，
    故全表开放；签发与分发不在本仓。通过后才进入下面的计算 / 读取链路。
+   **探针豁免**：`/healthz`（进程活着）与 `/readyz`（PG + 迁移 + 上游装配齐才 200）直接挂载，不过鉴权、不占限流桶。
 1. `POST /api/analysis/metrics {run_id}` → 拉结果 DTO → 分区（`from_result` 原样 / `computed` 补算）→ 落 `analysis.reports`
 2. `POST /api/analysis/benchmark {run_id, benchmark_code, window?}` → 查 `analysis.benchmarks` 最新登记 → 取基准序列（data）→ 对齐 → 超额 / TE / IR / beta / 滚动 → 落报告
 3. `POST /api/analysis/attribution {run_id, method}` → brinson 读 holdings artifact / factor 读因子暴露 → 分项 + residual → 落 `analysis.reports` + `analysis.attribution`

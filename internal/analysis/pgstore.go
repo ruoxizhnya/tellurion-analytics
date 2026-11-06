@@ -67,6 +67,25 @@ func (p *PG) Migrate(ctx context.Context) error {
 	return nil
 }
 
+// Ready 校验持久层就绪：池可连 + analysis.* 五张表已迁移（/readyz 的存储腿）。
+//
+// 只查存在性不查数据：/readyz 回答「能不能出报告」，不承担数据质量判定。
+func (p *PG) Ready(ctx context.Context) error {
+	if err := p.pool.Ping(ctx); err != nil {
+		return fmt.Errorf("analysis: ping postgres: %w", err)
+	}
+	for _, table := range []string{"reports", "benchmarks", "sensitivity_runs", "mc_runs", "attribution"} {
+		var name *string
+		if err := p.pool.QueryRow(ctx, `SELECT to_regclass($1)::text`, "analysis."+table).Scan(&name); err != nil {
+			return fmt.Errorf("analysis: check table analysis.%s: %w", table, err)
+		}
+		if name == nil {
+			return fmt.Errorf("analysis: table analysis.%s is missing (migrations not applied)", table)
+		}
+	}
+	return nil
+}
+
 const reportColumns = `report_id, run_id, analysis_type, status, metrics_version,
 	rtrim(params_hash), rtrim(input_hash), seed, body, error, created_at, updated_at`
 

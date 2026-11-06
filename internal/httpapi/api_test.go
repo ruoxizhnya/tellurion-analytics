@@ -80,7 +80,7 @@ func newTestServer(t *testing.T, opts analysis.Options) (*httptest.Server, *anal
 // 用真 kit TokenService 覆盖。
 type allowAllAuthorizer struct{}
 
-func (allowAllAuthorizer) Authorize(*http.Request) error { return nil }
+func (allowAllAuthorizer) Authorize(*http.Request) (string, error) { return "test-actor", nil }
 
 func newTestServerWithAuthorizer(t *testing.T, opts analysis.Options, authorizer Authorizer) (*httptest.Server, *analysis.Service) {
 	t.Helper()

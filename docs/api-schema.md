@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-26
-verified-by: H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` 服务间角色入策略表，ADR-0004）；2026-10-26 SVC-AN-G0 补进程探针 `GET /healthz`（无鉴权，不属 8 端点契约）
+last-verified: 2026-11-07
+verified-by: 2026-11-07 SVC-AN-G1 补 `GET /readyz`（就绪探针：PG + 迁移 + 上游装配，无鉴权不限流）、按身份限流（429 `rate_limited`）、上游 4xx/5xx 映射表（§2.1）、幂等语义写死（§3）与「无列表面」声明（§1）；2026-10-26 H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` 服务间角色入策略表，ADR-0004）与 SVC-AN-G0（`GET /healthz`）
 ---
 
 # API Schema — tellurion-analytics
@@ -35,6 +35,13 @@ verified-by: H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` �
 > **进程探针（2026-10-26，SVC-AN-G0）**：`GET /healthz` 返回 `200 text/plain "ok"`，挂在 `internal/httpapi` 之外、**不经鉴权**（探针必须无凭证可用）。
 > 它只表示进程在监听，**不**表示上游已接线——上游缺失仍是端点级 `503 dependency_unavailable`。Dockerfile / compose 的 `HEALTHCHECK` 消费它。
 > 因此上表仍是**8 个分析端点**的契约面；`/healthz` 是部署面，不参与角色策略表。
+
+> **就绪探针（2026-11-07，SVC-AN-G1）**：`GET /readyz` 回答「能不能出报告」，与 `/healthz` 的「进程活着」分工固定：
+> ① PG 池可连；② `analysis.*` 五张表（reports / benchmarks / sensitivity_runs / mc_runs / attribution）已迁移；③ 四个上游端口（results / benchmarks / holdings / factors / queue）装齐。
+> 任一不满足 → `503`，响应体 `{"status":"not_ready","store":"postgres|memory|unwired","missing":[...],"error":"..."}` **点名缺什么**；三者齐 → `200 {"status":"ready","store":"postgres"}`。
+> `store=memory`（未配 `-dsn`）恒 `503`——结果不落 `analysis.*`，进程活着不等于能出报告。`/readyz` 与 `/healthz` 一样直接挂载、**不经鉴权与限流**。
+
+> **无列表面（2026-11-07）**：本仓只有按 `report_id` 取回（`GET /reports/{id}`）与两种导出，**不提供报告列表端点**，因此也**不提供** `limit` / `cursor` 分页参数。列表归 UI / core；要枚举请从 core 的 run 面出发再按 id 取报告。
 
 **响应公共前缀**：所有**同步计算端点**（metrics / benchmark / attribution / correlation）与 `GET /reports/{id}` 的 2xx 报告体，都以 `{report_id, run_id, analysis_type, status}` 开头，随后才是各类型载荷。异步提交端点（sensitivity / montecarlo）只返回 `{report_id, status:"pending"}`；sensitivity 额外带 `parent_job_id`（X5b 父作业，2026-10-25 加，可缺省），完整信封由 `GET /reports/{id}` 给出。
 
@@ -72,12 +79,32 @@ verified-by: H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` �
 | 基准已登记但取不到序列 | 409 `benchmark_data_unavailable` | 不回落别的基准 / 不拿价格指数冒充全收益 |
 | 报告未完成（导出 / 读取报告体） | 409 `report_not_ready` | 轮询 `GET /reports/{id}` |
 | 依赖端口未配置 / 未接线（QT-44 队列；或部署未给上游 URL） | 503 `dependency_unavailable` | **不降级**：不伪造结果、不返回空报告、不回落别的数据源；补齐配置或接线后重试 |
+| 超过按身份限流（默认 50 rps / burst 200） | 429 `rate_limited` + `Retry-After: 1` | 退避重试。**鉴权先于限流**：无凭证恒 401、越权恒 403，不会被 429 掩盖。✅ 8 端点（2026-11-07，SVC-AN-G1）；探针 `/healthz`、`/readyz` 豁免 |
 
 **原则**：宁可报错，也不产出一份"看起来正常"的错误报告。`invalid` / `failed` / `incomplete` 三者**分开报**——它们对调用方的处置完全不同（换 run / 修上游 / 等数据）。`503` 是**部署态**问题（代码在、依赖没接），与业务错误分开，调用方应重试或联系运维，**不应**把它当"该 run 没数据"。
+
+### 2.1 上游 4xx/5xx ⇒ 本仓哪个码（闭集）
+
+> 「未配置上游 ⇒ 503」「缺 holdings / factor_exposures ⇒ 409 + `missing`」「缺 `seed` ⇒ 400」已在 §2 / §6.3，本节补齐**上游真返回 4xx/5xx 时**的折算。
+> 实现是唯一真相：`internal/upstream/upstream.go`、`internal/upstream/sensitivity.go`；改折算必须先改本节。
+
+| 上游（端口） | 上游条件 | 本仓返回 |
+|---|---|---|
+| core R1 结果面（`ResultReader`） | `404` | `404 run_not_found` |
+| core R1 结果面 | 其他非 2xx / 连接失败 / 解码失败 | `503 dependency_unavailable` |
+| data X1b 基准（`BenchmarkReader`） | **任意**非 2xx / 连接失败 / 解码失败 | `409 benchmark_data_unavailable` |
+| artifact 面（`Holdings` / `Factors`） | `404` | `409 run_result_incomplete` + `missing=holdings` / `factor_exposures` |
+| artifact 面 | 其他非 2xx / 连接失败 / 解码失败 | `503 dependency_unavailable` |
+| orchestration X5b 提交（`SensitivityQueue.Submit`） | 非 `200`/`202` / 连接失败 / 空 `parent_job_id` | `503 dependency_unavailable` |
+| orchestration X5b 查询（`SensitivityQueue.Status`） | `404` | 报告落 `failed`（父作业不存在是终态，**不是** wire 4xx） |
+| orchestration X5b 查询 | 其他非 2xx / 连接失败 | 保持 `pending`（瞬时故障不写成终态，下次读继续推进） |
+
+**不向上游透传 401/403**：上游凭证配错在调用方看来是 `503`（部署态）或 `409`（数据态），调用方不需要、也不应该知道上游鉴权细节——那是运维面。**唯一例外**是上游 404 的语义差异（结果 = 该 run 不存在；artifact = 该输入缺失），上表已分开。
 
 ## 3. 幂等性与重试
 
 - 计算类端点按 `(run_id, analysis_type, params_hash, input_hash, seed, metrics_version)` 派生**确定性** `report_id`：同键重复提交复用已有报告（字节一致），不重复计算。
+- **同键重复 POST 的冻结行为（2026-11-07 写死）**：返回**同一** `report_id` 与**逐字节一致**的响应体（复用已存报告，不重算、不落第二行），**不是** `409`。锚点 = `internal/httpapi.TestSyncPostIsIdempotentOnSameInput`（断言 `PutReport` 只发生一次）；去掉 `Service.*` 的 replay 早退 ⇒ 该用例红。
 - `input_hash` 覆盖所有读取输入（结果体 / 基准 `dataset_hash` / holdings artifact / 因子数据集）：**输入换版 ⇒ 新报告**，不复用旧结论。
 - `params_hash` 是请求参数（基准代码 / 归因方法 / 网格 / n 等）的 canonical hash；不同参数 ⇒ 不同 `report_id`。
 - 异步 job 的提交返回 `{report_id, status:"pending", parent_job_id?}`，轮询用 `GET /reports/{id}`；**作业态（pending/running/completed/failed）不是 K9 三值**，报告只在 completed 时存在。
@@ -89,8 +116,9 @@ verified-by: H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` �
 
 ## 4. 版本与兼容
 
-> 逐端点 / 逐符号的版本策略见 `ARCHITECTURE.md` §9.6；本节只留三条总则。
+> 逐端点 / 逐符号的版本策略见 `ARCHITECTURE.md` §9.6；本节只留总则。
 
+- **版本策略一行（2026-11-07 冻结）**：**加字段 = MINOR**（`omitempty`，消费端忽略未知字段）；**改名 / 删字段 / 改语义 = MAJOR**，先改本节与 `ARCHITECTURE.md` §9.6 再改代码。DTO 迁移到 `tellurion-contracts` 的**唯一**触发条件见 §6.4（core 或 orchestration 出现 import analytics DTO 的 Go 代码；HTTP 交互不算）。
 - 报告**格式**演进要保留旧版本读取（历史报告不能失效）。
 - 指标定义变更算 breaking：老报告不重算，新报告注明口径版本（`metrics_version`）。
 - 端点只增不删。导出格式：html / csv 稳定；**pdf 已裁为非目标**（R5，2026-10-24），不再列入承诺面。
@@ -225,6 +253,7 @@ verified-by: H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` �
 - **`service` 服务间角色（2026-10-26，裁-17 / ADR-0004）**：core 代机器调本仓时用 `service` 角色的长期 token。本仓 8 条端点**全部**开这一档——本仓没有审批 / 留痕 / 配置 / 交易端点，不存在「机器凭证代劳人的责任动作」这条风险面（详见 ADR-0004 的理由与代价）。
   - **签发与分发不在本仓**：本仓只保证「**有 token 就能用**」——不造 token、不存 token、不分发 token。签发入口是 kit `v0.1.2` 的 `IssueServiceToken`；签发与注入属 core QT-71 与 `deploy/k8s/` 部署清单（**跨仓腿**）。
   - **守卫**：`TestPolicy_ServiceRoleScope`（service 调 8 条端点都不被闸拦下 + viewer 打 POST 仍 403）、`TestPolicy_ServiceRoleCoexistsWithHumanRoles`（service 与真人角色并列写在同一条 `Roles`）、`TestPolicy_ServiceRoleDeclaredOnEveryRoute`（全表都开，新增端点漏表态即红）。
-  - ⚠️ **已知跨仓缺口（不在本仓）**：kit `auth/httpadapter.Authenticate` 要求 subject 可解析为 `int64`，而裁-17 的生产口径 `sub=service:<repo>` 是非数字 subject ⇒ 生产 token 目前会被 kit 判 401，压根到不了本仓的角色判定。本仓的守卫用例证明的是**本仓策略表**正确，**不**证明生产 token 能走通；该缺口归 kit（放宽 subject 校验）或改裁-17 的 subject 口径，**已报协调者**（与 risk 的同型缺口同一处）。
+  - ~~**已知跨仓缺口**：kit `Authenticate` 要求 subject 可解析为 `int64`，裁-17 的 `sub=service:<repo>` 会被判 401。~~ **已于 kit `v0.1.4`（KT-11）修复**：`role=service` 的非数字 subject 不再 401（本仓 `go.mod` 已 pin `v0.1.4`，见 `AGENTS.md` §4）。本仓策略表守卫仍只证「本仓判定正确」，生产 token 能否签发 / 分发归 `tellurion:QT-77`。
+- **限流（2026-11-07，SVC-AN-G1）**：鉴权通过后按身份（用户名，其次 subject；开放访问归同一桶）做令牌桶，默认 **50 rps / burst 200**（`internal/httpapi/limit.go`）；超限 `429 rate_limited` + `Retry-After: 1`。顺序固定「鉴权 → 限流」，因此 `401` / `403` 与 `429` 可区分。锚点 = `TestRateLimitIs429AndDistinctFromAuth`、`TestReadyzIsExemptFromAuthAndRateLimit`；探针 `/healthz`（cmd）与 `/readyz`（httpapi 直接注册）都豁免鉴权与限流。
 - **启动闸**：有 `JWT_SECRET` 启用鉴权；无 secret + 回环 = 开放；无 secret + 非回环 = **拒绝启动**。
 - **接线清单（已完成）**：① `AuthStatus` 常量与用例；② 本节与 §2 两行；③ `ARCHITECTURE.md` §9.7 R6；④ `docs/TASKS.md` QT-43 的「鉴权」条目；⑤ `service` 档（策略表 + 三条守卫用例 + ADR-0004 + 本节登记）。

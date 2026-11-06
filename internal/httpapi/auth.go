@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/ruoxizhnya/tellurion-kit/auth"
 	kithttp "github.com/ruoxizhnya/tellurion-kit/auth/httpadapter"
@@ -17,8 +19,10 @@ var (
 )
 
 // Authorizer 是本仓所有端点的鉴权闸。nil = 闸未装配，端点必须拒绝服务。
+//
+// principal 是限流分桶的身份（用户名，其次 subject）；开放访问返回空串。
 type Authorizer interface {
-	Authorize(r *http.Request) error
+	Authorize(r *http.Request) (principal string, err error)
 }
 
 // WithAuthorizer 装配端点鉴权闸。
@@ -37,31 +41,46 @@ type kitAuthorizer struct {
 	svc *auth.TokenService
 }
 
-func (a kitAuthorizer) Authorize(r *http.Request) error {
+func (a kitAuthorizer) Authorize(r *http.Request) (string, error) {
 	if a.svc == nil || !a.svc.Enabled() {
-		return nil
+		return "", nil
 	}
 	key := kithttp.RouteKey(r)
 	rule, declared := analyticsPolicy.Rule(key)
 	if !declared {
 		// 路由表 ≡ 策略表由守卫测试钉住；运行时仍 fail-closed。
-		return fmt.Errorf("%w: no authorization policy for %q", ErrForbidden, key)
+		return "", fmt.Errorf("%w: no authorization policy for %q", ErrForbidden, key)
 	}
 	claims, err := kithttp.Authenticate(a.svc, r)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnauthenticated, err)
+		return "", fmt.Errorf("%w: %v", ErrUnauthenticated, err)
 	}
 	if err := kithttp.Authorize(claims, rule); err != nil {
 		if errors.Is(err, kithttp.ErrForbidden) {
-			return fmt.Errorf("%w: %v", ErrForbidden, err)
+			return "", fmt.Errorf("%w: %v", ErrForbidden, err)
 		}
-		return fmt.Errorf("%w: %v", ErrUnauthenticated, err)
+		return "", fmt.Errorf("%w: %v", ErrUnauthenticated, err)
 	}
-	return nil
+	return principalOf(claims), nil
+}
+
+// principalOf 取限流身份：优先用户名，其次 subject（service token 的
+// subject 形如 service:<repo>，没有用户名）。
+func principalOf(claims *auth.Claims) string {
+	if claims == nil {
+		return ""
+	}
+	if name := strings.TrimSpace(claims.Username); name != "" {
+		return name
+	}
+	return claims.Subject
 }
 
 // requireAuth 是 fail-closed 闸：未装配 Authorizer → 503；无凭证 / 坏 token → 401；
-// 角色不足 → 403。只有 Authorize 返回 nil 才进入 handler。
+// 角色不足 → 403；通过鉴权后超限 → 429。只有 Authorize 返回 nil 才进入限流与 handler。
+//
+// 顺序固定为「鉴权 → 限流」：401/403 与 429 必须可区分，且无凭证的请求不消耗
+// 任何身份桶的令牌（也不该被限流掩盖成 429）。
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.authorizer == nil {
@@ -71,8 +90,14 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			})
 			return
 		}
-		switch err := s.authorizer.Authorize(r); {
+		principal, err := s.authorizer.Authorize(r)
+		switch {
 		case err == nil:
+			if !s.limiter.allow(rateKey(principal), time.Now()) {
+				w.Header().Set("Retry-After", "1")
+				writeJSON(w, http.StatusTooManyRequests, errorBody{Error: "rate limit exceeded", Code: "rate_limited"})
+				return
+			}
 			next.ServeHTTP(w, r)
 		case errors.Is(err, ErrUnauthenticated):
 			writeJSON(w, http.StatusUnauthorized, errorBody{Error: "authentication required", Code: "unauthenticated"})

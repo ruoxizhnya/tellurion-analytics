@@ -371,7 +371,7 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 > ② **M8 接口对表已落（2026-10-22）** → 本仓 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9（模板 = `tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §4.1；**本行原指的 `target-module-topology.md` UnifiedDataPoint 节是幻影引用，已订正**）。
 > 正文以 core 彼处为准，此处只留指针、不镜像。
 
-### SVC-AN-G1 · 服务就绪门 G1：版本化 · 错误模型闭合 · 幂等 · 分页 · 就绪探针（ADR-036）[P1] ⬜
+### SVC-AN-G1 · 服务就绪门 G1：版本化 · 错误模型闭合 · 幂等 · 分页 · 就绪探针（ADR-036）[P1] 🔶
 
 - **① 目标**：本仓 8 条端点补齐 ADR-036 §3 的 G1 五件（版本化 API / 错误模型 / 鉴权 / 幂等 / 分页·限流），其中鉴权已落、其余四件今天没有判据。
 - **② 上下文**：8 条路由实测（`POST /api/analysis/{metrics,benchmark,attribution,sensitivity,montecarlo,correlation}` + `GET /api/analysis/reports/{id}` + `GET .../reports/{id}/export`），全部过鉴权闸（`auth.go` = kit `v0.1.4` 适配、`policy.go` = 策略表，`service` 角色已入表，ADR-0004）；`/healthz` 已随 `f010606` 修好（G0 缺口关闭）；**`/readyz` 全 workspace 代码 0 命中**；实测本仓无 openapi 文件、无分页参数（`limit`/`offset` 0 命中）、无限流；`mc_runs.seed` 必填已是既有约束（幂等的一部分）。**DTO 归属已裁**（裁决 ③：owner = 本仓，`internal/analysis/model.go` 不迁 contracts，触发条件 = core / orchestration 出现 import 本仓 DTO 的 Go 代码；守卫 `TestUpstreamContractOwnerStaysLocal`）⇒ 本单**不**以「进契约」为验收。
@@ -379,6 +379,13 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 - **④ 约束与非目标**：不把 DTO 迁进 contracts（裁决 ③ 未触发）；不读上游表（只经 HTTP 端口）；不自建 openapi 生成管线（那是 §4 of `tellurion-contracts:docs/design/shape-packages-decision-material.md` 的口径题，未裁）；不改指标公式（指标不得重算 = F5 约束）；不引新依赖。
 - **⑤ 验收**：① `/readyz` 三条用例（无 PG → 503、PG 可用但未配上游 → 503 且报文点名缺哪个上游、两者齐 → 200）；② 幂等用例：同输入两次 `POST` ⇒ 断言预期行为（同 id 或明确 409），破坏验证：去掉 input_hash 复用逻辑 ⇒ 红；③ 错误码表逐条对得上实现（抽 3 条）；④ 429 与 401 可区分 + 探针豁免用例；⑤ `go build/vet/test ./...` 三条绿（贴真实退出码）。
 - **⑥ 边界**：本仓接口面；归因输入的生产者不在本仓（见 `tellurion:QT-78`，本仓只做「拿不到就 fail-closed」的消费端）；core 指标实现的退役归 `tellurion:SVC-CORE-AN-RETIRE`。
+- **⑦ 施工记录（2026-11-07）**：
+  - **落地**：① `/readyz` —— `internal/httpapi/api.go` 增 `ReadinessReport` / `ReadinessFunc` / `WithReadiness` 与 `GET /readyz`（直接挂载、不鉴权不限流）；判定 = PG 可连 + `analysis.*` 五表已迁移 + 上游四端口装齐，响应 `{"status":"not_ready","store":"postgres|memory|unwired","missing":[...],"error":"..."}`，memory 恒 503；`internal/analysis/pgstore.go` 增 `PG.Ready`（Ping + `to_regclass` 五表）；`internal/analysis/service.go` 增 `MissingUpstreams()`；`cmd/analyticsservice/main.go` 装配判定（`pg != nil` 走真库腿，否则 memory 未就绪）。② 错误模型闭合写入 `api-schema.md` §2 行 + §2.1 上游折算表（结果面 404→404、其余非 2xx→503；基准任意非 2xx→409；artifact 404→409 `run_result_incomplete`、其余→503；队列提交非 200/202→503；队列查询 404→报告 `failed`、其余保持 `pending`）。③ 幂等语义写死为「同键 ⇒ 同一 `report_id` + 逐字节一致 body，不重算」，并补用例。④ 分页：无列表面，已在 `api-schema.md` §1 显式声明。⑤ 版本策略一行入 `api-schema.md` §4（加字段 MINOR / 改名删字段改语义 MAJOR），§6.4 触发条件保持可反查。⑥ 限流 —— `internal/httpapi/limit.go` 按身份令牌桶（默认 50 rps / burst 200），`requireAuth` 顺序固定「鉴权 → 限流」，超限 429 `rate_limited` + `Retry-After: 1`；探针豁免。
+  - **用例**：`internal/httpapi/g1_test.go` —— `TestReadyzThreeVerdicts`（未装配 / memory / PG 故障 / PG 可连但缺上游 / 全齐五态）、`TestReadyzIsExemptFromAuthAndRateLimit`、`TestRateLimitIs429AndDistinctFromAuth`（无凭证恒 401，带凭证超 burst 才 429）、`TestSyncPostIsIdempotentOnSameInput`（`countingStore` 断言 `PutReport` 只 1 次）。
+  - **破坏验证（真做真还原）**：① 删 `Service.Metrics` 的 `replay` 早退 ⇒ `TestSyncPostIsIdempotentOnSameInput` 红（`PutReport called 2 times, want 1`），还原后复绿；② 把 `/readyz` 包进 `requireAuth` ⇒ `TestReadyzIsExemptFromAuthAndRateLimit` 红（`/readyz attempt 1 = 403`），还原后复绿。
+  - **未执行（本单保持 🔶 的唯一原因）**：真 PG 的 `/readyz` 200 腿与 `PG.Ready` 的 `to_regclass` 检查**未执行**——本机 Docker 引擎不可用、无可用 PG，`ANALYTICS_TEST_DSN` 未设。handler 级三态已由注入判定覆盖，但**不等同**于「真库 + 真迁移」验证。
+  - **文档**：`docs/api-schema.md`（§1 `/readyz` + 无列表面、§2 429 行、§2.1 上游折算表、§3 幂等冻结、§4 版本策略、§7 限流与 kit 缺口订正）、本节、`AGENTS.md` §1。
+  - **门禁（真实退出码）**：`gofmt -l .` 无输出、`go build ./...`=0、`go vet ./...`=0、`go test ./... -count=1`=0（`cmd/analyticsservice` / `internal/analysis` / `internal/httpapi` / `internal/upstream` 全 ok）。
 
 ### SVC-AN-G2 · 服务就绪门 G2：`analysis.*` 唯一 writer 与可重放迁移（ADR-036）[P1] ⬜
 
