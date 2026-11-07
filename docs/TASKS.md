@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-26
-verified-by: H6（R2 owner 落本仓 + 触发条件成文于 api-schema §6.4；service 服务间角色入策略表，ADR-0004）
+last-verified: 2026-11-07
+verified-by: SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -371,7 +371,7 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 > ② **M8 接口对表已落（2026-10-22）** → 本仓 [`ARCHITECTURE.md`](ARCHITECTURE.md) §9（模板 = `tellurion:docs/design/qt-decoupling/data-service-contract-and-ownership.md` §4.1；**本行原指的 `target-module-topology.md` UnifiedDataPoint 节是幻影引用，已订正**）。
 > 正文以 core 彼处为准，此处只留指针、不镜像。
 
-### SVC-AN-G1 · 服务就绪门 G1：版本化 · 错误模型闭合 · 幂等 · 分页 · 就绪探针（ADR-036）[P1] 🔶
+### SVC-AN-G1 · 服务就绪门 G1：版本化 · 错误模型闭合 · 幂等 · 分页 · 就绪探针（ADR-036）[P1] ✅（2026-11-07 真库腿补齐）
 
 - **① 目标**：本仓 8 条端点补齐 ADR-036 §3 的 G1 五件（版本化 API / 错误模型 / 鉴权 / 幂等 / 分页·限流），其中鉴权已落、其余四件今天没有判据。
 - **② 上下文**：8 条路由实测（`POST /api/analysis/{metrics,benchmark,attribution,sensitivity,montecarlo,correlation}` + `GET /api/analysis/reports/{id}` + `GET .../reports/{id}/export`），全部过鉴权闸（`auth.go` = kit `v0.1.4` 适配、`policy.go` = 策略表，`service` 角色已入表，ADR-0004）；`/healthz` 已随 `f010606` 修好（G0 缺口关闭）；**`/readyz` 全 workspace 代码 0 命中**；实测本仓无 openapi 文件、无分页参数（`limit`/`offset` 0 命中）、无限流；`mc_runs.seed` 必填已是既有约束（幂等的一部分）。**DTO 归属已裁**（裁决 ③：owner = 本仓，`internal/analysis/model.go` 不迁 contracts，触发条件 = core / orchestration 出现 import 本仓 DTO 的 Go 代码；守卫 `TestUpstreamContractOwnerStaysLocal`）⇒ 本单**不**以「进契约」为验收。
@@ -383,7 +383,13 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
   - **落地**：① `/readyz` —— `internal/httpapi/api.go` 增 `ReadinessReport` / `ReadinessFunc` / `WithReadiness` 与 `GET /readyz`（直接挂载、不鉴权不限流）；判定 = PG 可连 + `analysis.*` 五表已迁移 + 上游四端口装齐，响应 `{"status":"not_ready","store":"postgres|memory|unwired","missing":[...],"error":"..."}`，memory 恒 503；`internal/analysis/pgstore.go` 增 `PG.Ready`（Ping + `to_regclass` 五表）；`internal/analysis/service.go` 增 `MissingUpstreams()`；`cmd/analyticsservice/main.go` 装配判定（`pg != nil` 走真库腿，否则 memory 未就绪）。② 错误模型闭合写入 `api-schema.md` §2 行 + §2.1 上游折算表（结果面 404→404、其余非 2xx→503；基准任意非 2xx→409；artifact 404→409 `run_result_incomplete`、其余→503；队列提交非 200/202→503；队列查询 404→报告 `failed`、其余保持 `pending`）。③ 幂等语义写死为「同键 ⇒ 同一 `report_id` + 逐字节一致 body，不重算」，并补用例。④ 分页：无列表面，已在 `api-schema.md` §1 显式声明。⑤ 版本策略一行入 `api-schema.md` §4（加字段 MINOR / 改名删字段改语义 MAJOR），§6.4 触发条件保持可反查。⑥ 限流 —— `internal/httpapi/limit.go` 按身份令牌桶（默认 50 rps / burst 200），`requireAuth` 顺序固定「鉴权 → 限流」，超限 429 `rate_limited` + `Retry-After: 1`；探针豁免。
   - **用例**：`internal/httpapi/g1_test.go` —— `TestReadyzThreeVerdicts`（未装配 / memory / PG 故障 / PG 可连但缺上游 / 全齐五态）、`TestReadyzIsExemptFromAuthAndRateLimit`、`TestRateLimitIs429AndDistinctFromAuth`（无凭证恒 401，带凭证超 burst 才 429）、`TestSyncPostIsIdempotentOnSameInput`（`countingStore` 断言 `PutReport` 只 1 次）。
   - **破坏验证（真做真还原）**：① 删 `Service.Metrics` 的 `replay` 早退 ⇒ `TestSyncPostIsIdempotentOnSameInput` 红（`PutReport called 2 times, want 1`），还原后复绿；② 把 `/readyz` 包进 `requireAuth` ⇒ `TestReadyzIsExemptFromAuthAndRateLimit` 红（`/readyz attempt 1 = 403`），还原后复绿。
-  - **未执行（本单保持 🔶 的唯一原因）**：真 PG 的 `/readyz` 200 腿与 `PG.Ready` 的 `to_regclass` 检查**未执行**——本机 Docker 引擎不可用、无可用 PG，`ANALYTICS_TEST_DSN` 未设。handler 级三态已由注入判定覆盖，但**不等同**于「真库 + 真迁移」验证。
+  - **未执行（当日早先状态，已被下方真库记录替代）**：真 PG 的 `/readyz` 200 腿与 `PG.Ready` 的 `to_regclass` 检查当时**未执行**——本机 Docker 引擎不可用、无可用 PG，`ANALYTICS_TEST_DSN` 未设。handler 级三态已由注入判定覆盖，但**不等同**于「真库 + 真迁移」验证。
+  - **真库腿补齐（2026-11-07 晚，本单翻 ✅）**：便携 PostgreSQL 16.2 @ `127.0.0.1:55432`、库 `tellurion_analytics_test`，真二进制 `cmd/analyticsservice`，四上游 URL 全指向自身（`readers wired result=true benchmark=true holdings=true factors=true queue=true`）：
+    - **全齐 ⇒ 200**：`GET /readyz` → `200`，body `{"status":"ready","store":"postgres"}`（`PG.Ready` 的 `to_regclass` 五表检查在真库上通过）。
+    - **PG 可用但未配上游 ⇒ 503 且点名**：同 DSN、四个上游 env 留空 ⇒ `503`，body `{"status":"not_ready","store":"postgres","missing":["results","benchmarks","holdings","factors","queue"]}`。
+    - **停 PG ⇒ 503**：`pg_ctl -D ... stop -m fast`（`STOP_EXIT=0`）后 `GET /readyz` → `503`，body `{"status":"not_ready","store":"postgres","error":"analysis: ping postgres: write failed: write tcp 127.0.0.1:58576->127.0.0.1:55432: wsasend: An existing connection was forcibly closed by the remote host."}`，进程保持存活（`ALIVE_AFTER_STOP=True`），不降级成 200。
+    - **恢复 ⇒ 200**：`pg_ctl start`（`START_EXIT=0`）后 `GET /readyz` → `200`，body `{"status":"ready","store":"postgres"}`。
+    - 同 DSN 下 `go test ./... -count=1` 退出码 `0`（四包全 ok）；`gofmt -l .` 空输出、`go build`=0、`go vet`=0。
   - **文档**：`docs/api-schema.md`（§1 `/readyz` + 无列表面、§2 429 行、§2.1 上游折算表、§3 幂等冻结、§4 版本策略、§7 限流与 kit 缺口订正）、本节、`AGENTS.md` §1。
   - **门禁（真实退出码）**：`gofmt -l .` 无输出、`go build ./...`=0、`go vet ./...`=0、`go test ./... -count=1`=0（`cmd/analyticsservice` / `internal/analysis` / `internal/httpapi` / `internal/upstream` 全 ok）。
 
@@ -406,12 +412,12 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
   - **保留期**：**90 天**（五表同数）。理由 = 报告可由输入重算（`input_hash` / `params_hash` / `seed` 留痕），不承担审计留痕义务；与 broker 已裁的 90 天保留期同族（`tellurion:SVC-RETIRE-INDEX`）。数值在 G4 runbook 可调，**调整需同批改 `docs/db-schema.md` §1.1**。
   - **破坏验证（真做真还原）**：在 `internal/analysis/pgstore.go` 临时加常量 `g2Breaker`，值为 `UPDATE quant.portfolio_snapshots SET x=1` ⇒ 护栏红：`g2_schema_write_guard_test.go:76: internal/analysis/pgstore.go:301 写语句引用了禁止的 schema 限定 "quant."`，`go test ./internal/analysis -run TestG2OnlyAnalysisSchemaIsWritable -count=1` 退出码 **1**。用备份逐字节还原，还原前后 sha256 同为 **`e29c3be069e3c41d47870ea5c7dc0bcf5954c973fa6d82f5e8861a0060ae7aa6`**（`git status` 中 `pgstore.go` 已无改动），复绿。
   - **门禁（真实退出码）**：`gofmt -l`（本单改动的两个测试文件）无输出；`go build ./...`=**0**、`go vet ./...`=**0**、`go test ./... -count=1`=**0**（`cmd/analyticsservice` / `internal/analysis` / `internal/httpapi` / `internal/upstream` 全 ok）。
-  - **未执行（本单保持 🔶 的唯一原因）**：真 PG 的迁移重放腿 `TestG2MigrationReplayIsStable` **未执行**——本机 `127.0.0.1:5432` 无监听、Docker 引擎不可用、`ANALYTICS_TEST_DSN` 未设，用例如实 `SKIP`。静态护栏腿与文档腿已全部真跑。
+  - **未执行（当日早先状态，已被本节顶部真库记录替代）**：真 PG 的迁移重放腿 `TestG2MigrationReplayIsStable` 当时**未执行**——本机 `127.0.0.1:5432` 无监听、Docker 引擎不可用、`ANALYTICS_TEST_DSN` 未设，用例如实 `SKIP`。静态护栏腿与文档腿已全部真跑。
   - **边界**：本单只做本仓 schema 自证；`benchmarks` 的写者启用与上游切读归 core / orchestration 各自单。
 
-### SVC-AN-G4 · 服务就绪门 G4：纯函数口径 · 上游失败语义 · runbook（ADR-036）[P1] 🔶
+### SVC-AN-G4 · 服务就绪门 G4：纯函数口径 · 上游失败语义 · runbook（ADR-036）[P1] ✅（2026-11-07 真库腿补齐）
 
-> 2026-11-07 施工：①~⑥ 全部落地并真跑；**真 PG / Docker 容器腿未执行**（本机无 PostgreSQL、Docker 引擎不可用），故按纪律标 🔶，不标 ✅。
+> 2026-11-07 施工：①~⑥ 全部落地并真跑；当日早先**真 PG 腿未执行**（本机无 PostgreSQL、Docker 引擎不可用）故记 🔶；**晚间已用便携 PostgreSQL 16.2 补齐 PG 起停 / 迁移重放 / `ANALYTICS_TEST_DSN` 集成腿，本单翻 ✅**。
 
 - **① 目标**：把「本仓可复现」与「上游挂了会怎样」两件事写成可核对文档并演练一次——本仓的设计承诺是**纯函数**，这条承诺今天没有运维面支撑。
 - **② 上下文**：SYSTEM-DESIGN §4 批量/分析行的关键约束原文：「分析**纯函数**（不读时钟、不读随机，蒙特卡洛必须带 `seed`）」；上游端口未配置时 fail-closed 成 503 `dependency_unavailable`（已落）；`/healthz` 已 200；**缺 `/readyz`（属 G1）、缺超时/重试口径、缺 runbook**（全 workspace `runbook` 只出现在 ADR-036 正文）；出站三条 reader（Result / Benchmark / Artifact）都要求带 Bearer（`internal/upstream/upstream_test.go` 已钉），但超时上界与「上游 5xx 时是否重试」无文档。
@@ -426,10 +432,14 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
   - **③ 出站超时上界**：`internal/upstream` 新增 `outboundTimeout`（生产值 **10s**）与 `boundedContext`，`ResultReader.GetResult`、`BenchmarkReader.getJSON`、`ArtifactReader.getJSON`、`SensitivityQueue.Submit` / `Status` 每次请求都套 `context.WithTimeout`——**注入的 `http.Client` 没有 `Timeout` 也兜得住**。用例 `TestG4OutboundRequestHasTimeoutBound`：永不响应的假上游 + `&http.Client{}`，100ms 上界实跑输出 `failed after 100ms with dependency unavailable: … context deadline exceeded`。
   - **③ 破坏验证（真做真还原）**：删掉 `ResultReader.GetResult` 的 `boundedContext` 两行 ⇒ 红：`g4_timeout_test.go:69: GetResult did not return within 2s: 出站请求缺少显式超时上界…`，退出码 **1**。逐字节还原后 sha256 同为 **`63D865CE93E424AE0C6AED9A195A9DB2D80253BE14F68C13D5EECE6BD56D5EAC`**，复绿（退出码 0）。
   - **④ 报告体生命周期与保留期**：`docs/runbook.md` §6 成文，数值直接引用 `docs/db-schema.md` §1.1 的 **90 天**（与 SVC-AN-G2 ④ 同数，未自造）；`db-schema.md` frontmatter 记 G4 引用，数值未改。
-  - **⑤ runbook**：新建 `docs/runbook.md`（起停 / 看日志 / 重放迁移 / `ANALYTICS_TEST_DSN` 集成腿 / 上游不可达排查顺序 / 生命周期 / 演练记录）。实跑：`go build` 后 `Start-Process` 起 `127.0.0.1:18087`，`/healthz` = **200 ok**，`/readyz` = **503** + `{"status":"not_ready","store":"memory","missing":["store: postgres (set -dsn / ANALYTICS_DATABASE_DSN)"]}`；`Stop-Process` 后端口不再监听。**未执行**：带 `ANALYTICS_TEST_DSN` 的 PG 起停 / 迁移重放（本机无 PG）；runbook 中这些命令已标「未执行」。
+  - **⑤ runbook**：新建 `docs/runbook.md`（起停 / 看日志 / 重放迁移 / `ANALYTICS_TEST_DSN` 集成腿 / 上游不可达排查顺序 / 生命周期 / 演练记录）。当日早先实跑（内存档）：`/healthz` = **200 ok**，`/readyz` = **503** + `{"status":"not_ready","store":"memory","missing":["store: postgres (set -dsn / ANALYTICS_DATABASE_DSN)"]}`；`Stop-Process` 后端口不再监听。**晚间真库补齐**：便携 PG 16.2 同上库，真二进制接 `ANALYTICS_DATABASE_DSN` + 四上游 URL ⇒ `/readyz` `200 {"status":"ready","store":"postgres"}`；`pg_ctl stop -m fast` ⇒ `503`（`ALIVE_AFTER_STOP=True`）；`pg_ctl start` ⇒ `200`。**未执行（如实）**：`docker compose` 容器腿（本机 Docker 引擎不可用，不属本单验收）。
   - **⑥ 演练（httptest 真跑）**：`TestG4DrillUpstreamOutageAndDeterministicReplay`。阶段 1 上游 handler hijack 并关闭 TCP 连接 ⇒ `HTTP 503 code=dependency_unavailable`（error 含 `EOF`），`PutReport=0`（无半成品）；阶段 2 恢复后同输入两次 ⇒ `report_id=76d8f1cc2cb77d4ef385921009eabf38c593293be8c78f53c751ba054cff9d9a`、两次 `len=569`、sha256 均为 **`e020eea2268563b09aa5769642f564017aeaf339872d65868a37144101620112`**、`identical bytes=true`、`PutReport=1`。
   - **门禁（真实退出码）**：`gofmt -l .` 无输出（退出码 **0**）；`go build ./...`=**0**；`go vet ./...`=**0**；`go test ./... -count=1`=**0**（`cmd/analyticsservice` / `internal/analysis` / `internal/httpapi` / `internal/upstream` 全 ok）。
-  - **未执行（本单保持 🔶 的唯一原因）**：真 PG 的迁移重放 / PG Store 用例与 `ANALYTICS_TEST_DSN` 集成腿 **未执行**——本机 `127.0.0.1:5432` 无监听、Docker 引擎不可用；`TestG2MigrationReplayIsStable` 如实 `SKIP`（`ANALYTICS_TEST_DSN is not set`，退出码 0）。未引 APM、未加依赖、未引入无 seed 随机性、未改上游、未动其它仓。
+  - **未执行（当日早先状态，已被下方真库腿替代）**：真 PG 的迁移重放 / PG Store 用例与 `ANALYTICS_TEST_DSN` 集成腿当时**未执行**——本机 `127.0.0.1:5432` 无监听、Docker 引擎不可用；`TestG2MigrationReplayIsStable` 当时如实 `SKIP`（`ANALYTICS_TEST_DSN is not set`）。未引 APM、未加依赖、未引入无 seed 随机性、未改上游、未动其它仓。
+  - **真库腿补齐（2026-11-07 晚，本单翻 ✅）**：便携 PG 16.2 @ `127.0.0.1:55432` / `tellurion_analytics_test`，`ANALYTICS_TEST_DSN` 下：
+    - `go test ./internal/analysis -run 'TestG2MigrationReplayIsStable|TestPG' -v -count=1` → `EXIT=0`；`TestG2MigrationReplayIsStable` PASS，日志 `replayed 11 migration statements; fingerprint stable sha256=d6cf49d3a3e22c3a67498276d6c7084955b94aa9c9a17ce7bb66f3f2b064bd69`（五表行数 + 索引集 + 列集打印齐全）；PG Store 七条（`TestPGMigrateIdempotent` / `TestPGReportLifecycle` / `TestPGReportSeedRoundTrip` / `TestPGCompletedReportIsImmutableInDB` / `TestPGBenchmarks` / `TestPGAttributionAndMonteCarlo` / `TestPGSensitivityBackfill`）全 PASS。
+    - `go test ./... -count=1` → `EXIT=0`（四包全 ok）；`gofmt -l .` 空输出、`go build`=0、`go vet`=0。
+    - 真二进制起停演练见 ⑤（200→503→200）；`docker compose` 容器腿仍未执行（本机 Docker 引擎不可用），不属本单验收。
   - **边界**：本单只做本仓运维面与不变量守卫；凭证分发归 `tellurion:QT-77`，上游实现归各自仓。
 
 ## 施工序（候选单，开工前必须展开成六字段）
