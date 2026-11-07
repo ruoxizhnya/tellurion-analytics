@@ -461,6 +461,7 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 |---|---|---|
 | QT-43 | X4 分析服务（基准 / 归因 / 敏感性 / 蒙特卡洛） | 已迁入本仓「一、本仓任务」（2026-10-21；core `tellurion:docs/TASKS.md` 留同号指针） |
 | QT-08 | 本仓 CI / AGENTS / 台账由该单一并补齐 | `tellurion:docs/TASKS.md` |
+| CT-04 | 编排提交报文形状已落 contracts（`run.ParentSubmitRequest` / `ParentBatchRequest` / `ParentWalkForwardRequest` / `ParentWindows` + 子 run 幂等键） | `tellurion-contracts:docs/TASKS.md`（✅ 2026-11-07，本地 tag `v0.8.0` **未 push**）；本仓 `internal/upstream/sensitivity.go` 的本地提交 DTO 改用契约类型**待立单**（前置 = tag 推远端后升 pin）；本指针不含正文 |
 
 ---
 
