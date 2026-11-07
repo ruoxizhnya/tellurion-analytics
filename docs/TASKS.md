@@ -387,7 +387,7 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
   - **文档**：`docs/api-schema.md`（§1 `/readyz` + 无列表面、§2 429 行、§2.1 上游折算表、§3 幂等冻结、§4 版本策略、§7 限流与 kit 缺口订正）、本节、`AGENTS.md` §1。
   - **门禁（真实退出码）**：`gofmt -l .` 无输出、`go build ./...`=0、`go vet ./...`=0、`go test ./... -count=1`=0（`cmd/analyticsservice` / `internal/analysis` / `internal/httpapi` / `internal/upstream` 全 ok）。
 
-### SVC-AN-G2 · 服务就绪门 G2：`analysis.*` 唯一 writer 与可重放迁移（ADR-036）[P1] ⬜
+### SVC-AN-G2 · 服务就绪门 G2：`analysis.*` 唯一 writer 与可重放迁移（ADR-036）[P1] 🔶（2026-11-07 施工；真 PG 重放腿未执行）
 
 - **① 目标**：五张 `analysis.*` 表在本仓自证「只有我写、迁移可重放」，并把「谁真的在写 `benchmarks`」这条空账填成有答案的行。
 - **② 上下文**：`internal/analysis/pgstore.go` 有 PG 实现与 `analysis.*` DDL，`ANALYTICS_TEST_DSN` 腿可选跑；**实测写面存在但生产调用为零**：`pgstore.go:196` 有 `INSERT INTO analysis.benchmarks`，而 core 侧材料 §4.5 明写「analytics 的 `analysis.benchmarks` 写方法生产零调用 ⇒ 先要有真写者」（本仓台账亦登记基准面依赖 X1b）⇒ 「唯一 writer」当前是**唯一 = 零**，与 ADR-036 §5.2 的「一个 schema 只有一个 owner」不冲突但与「有数据」冲突，必须在 `db-schema.md` 里写明；本仓对上游只读（AGENTS §3 硬约束）。
@@ -395,6 +395,14 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 - **④ 约束与非目标**：不 `DROP` 表；不改上游任何 schema；不为「有写者」而造假数据；不把 `analysis.*` 的报告内容塞进 core 的 `backtest_jobs`；不在本单接归因输入生产者。
 - **⑤ 验收**：① 重放腿两次指纹逐位相同（贴输出）；② 破坏验证：往本仓任一 SQL 常量加一行 `UPDATE quant.portfolio_snapshots` ⇒ 护栏红、还原复绿；③ `benchmarks` 的处置有落档且与 `db-schema.md` 一致；④ 保留期数值成文；⑤ 三条命令绿。
 - **⑥ 边界**：本仓 schema 自证；上游写者与切读归 core / orchestration 各自单。
+- **⑦ 施工记录（2026-11-07）**：
+  - **落地**：① 迁移重放自证腿 —— `internal/analysis/g2_replay_test.go` 的 `TestG2MigrationReplayIsStable`：复用 `openTestPG` 跑第一次 `Migrate`，再在 `REPEATABLE READ` 事务里用同一迁移锁（`pg_advisory_xact_lock('tellurion.analysis.migrate')`）重放全部 `Migrations()`，前后各自采集「五表行数 / `pg_indexes` 集合 / 列集（类型·可空·默认值）」，排序成文本后取 sha256 比较；未设 `ANALYTICS_TEST_DSN` ⇒ `t.Skip`（不是 fail）。② 禁跨 schema 写护栏 —— `internal/analysis/g2_schema_write_guard_test.go` 的 `TestG2OnlyAnalysisSchemaIsWritable`：go/ast 扫全仓 `.go` 字符串字面量（跳过 `.git` / `vendor` / `node_modules` / `testdata`），写语句（`INSERT` / `UPDATE` / `DELETE` / `TRUNCATE` / DDL）出现 `quant.` / `market.` / `run.` / `risk.` / `strategy.` / `ai.` / `broker.` / `public.` 即红，数据写目标未限定 schema 也红，只读 `SELECT` 不拦。③④ 文档 —— `docs/db-schema.md` 新增 §1.1（五表谁写 / 谁读 / 生命周期 + 保留期）、`benchmarks` 处置段，并订正 §1 现状列。
+  - **`benchmarks` 处置（三选一定死）**：**「显式声明：表已建、暂不启用」**。依据：`PG.RegisterBenchmark` 是唯一写路径，`INSERT INTO analysis.benchmarks` 存在但**生产调用为零**（仅测试 / E2E 装配调用），X1b 基准数据尚未接到本仓。启用前置 = **X1b 基准面接通，或 UI 手工登记（另立单）**；本单**不造**基准数据。
+  - **保留期**：**90 天**（五表同数）。理由 = 报告可由输入重算（`input_hash` / `params_hash` / `seed` 留痕），不承担审计留痕义务；与 broker 已裁的 90 天保留期同族（`tellurion:SVC-RETIRE-INDEX`）。数值在 G4 runbook 可调，**调整需同批改 `docs/db-schema.md` §1.1**。
+  - **破坏验证（真做真还原）**：在 `internal/analysis/pgstore.go` 临时加常量 `g2Breaker`，值为 `UPDATE quant.portfolio_snapshots SET x=1` ⇒ 护栏红：`g2_schema_write_guard_test.go:76: internal/analysis/pgstore.go:301 写语句引用了禁止的 schema 限定 "quant."`，`go test ./internal/analysis -run TestG2OnlyAnalysisSchemaIsWritable -count=1` 退出码 **1**。用备份逐字节还原，还原前后 sha256 同为 **`e29c3be069e3c41d47870ea5c7dc0bcf5954c973fa6d82f5e8861a0060ae7aa6`**（`git status` 中 `pgstore.go` 已无改动），复绿。
+  - **门禁（真实退出码）**：`gofmt -l`（本单改动的两个测试文件）无输出；`go build ./...`=**0**、`go vet ./...`=**0**、`go test ./... -count=1`=**0**（`cmd/analyticsservice` / `internal/analysis` / `internal/httpapi` / `internal/upstream` 全 ok）。
+  - **未执行（本单保持 🔶 的唯一原因）**：真 PG 的迁移重放腿 `TestG2MigrationReplayIsStable` **未执行**——本机 `127.0.0.1:5432` 无监听、Docker 引擎不可用、`ANALYTICS_TEST_DSN` 未设，用例如实 `SKIP`。静态护栏腿与文档腿已全部真跑。
+  - **边界**：本单只做本仓 schema 自证；`benchmarks` 的写者启用与上游切读归 core / orchestration 各自单。
 
 ### SVC-AN-G4 · 服务就绪门 G4：纯函数口径 · 上游失败语义 · runbook（ADR-036）[P1] ⬜
 
