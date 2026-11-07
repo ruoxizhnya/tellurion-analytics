@@ -34,6 +34,19 @@ const maxResponseBytes = 32 << 20
 // defaultTimeout 是未注入 client 时的请求超时。
 const defaultTimeout = 10 * time.Second
 
+// outboundTimeout 是**每次**出站请求的显式上界（SVC-AN-G4 ③）。
+//
+// 它作用在 context 上，因此即使调用方注入了没有 Timeout 的 http.Client 也成立；
+// 这是 core `AUD-56`（无 `CommandContext` 的子进程挂 601s）的 HTTP 版教训：
+// 上游不响应时必须在有限时间内失败并折算成有码的领域错误，不能无限挂住请求。
+// 单测会临时改小它（注入永不响应的假上游），生产值 = 10s。
+var outboundTimeout = defaultTimeout
+
+// boundedContext 给一次上游请求套上显式截止时间。
+func boundedContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, outboundTimeout)
+}
+
 func clientOr(client *http.Client) *http.Client {
 	if client != nil {
 		return client
@@ -109,6 +122,8 @@ func (r *ResultReader) GetResult(ctx context.Context, runID string) (*analysis.B
 		return nil, analysis.ErrRunNotFound
 	}
 	endpoint := joinURL(r.base, "/api/backtest/"+url.PathEscape(runID)+"/report")
+	ctx, cancel := boundedContext(ctx)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: build result request: %v", analysis.ErrDependencyUnavailable, err)
@@ -265,6 +280,8 @@ func (r *BenchmarkReader) GetSeries(ctx context.Context, code, basis string, sta
 
 // getJSON 取一个 JSON 响应；非 2xx 一律按 benchmark_data_unavailable 报。
 func (r *BenchmarkReader) getJSON(ctx context.Context, endpoint string, dst any) error {
+	ctx, cancel := boundedContext(ctx)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("%w: build request: %v", analysis.ErrBenchmarkDataUnavailable, err)
@@ -342,6 +359,8 @@ func (r *ArtifactReader) GetFactorExposures(ctx context.Context, runID string) (
 // 其他失败是部署态问题（503）。
 func (r *ArtifactReader) getJSON(ctx context.Context, runID, kind, missing string, dst any) error {
 	endpoint := joinURL(r.base, "/runs/"+runID+"/"+kind)
+	ctx, cancel := boundedContext(ctx)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("%w: build %s request: %v", analysis.ErrDependencyUnavailable, kind, err)

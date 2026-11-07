@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-23
-verified-by: QT-43 施工 ①（导航补 §9.8 实现现状）
+last-verified: 2026-11-07
+verified-by: SVC-AN-G4（导航补 runbook.md）；QT-43 施工 ①（导航补 §9.8 实现现状）
 ---
 
 # 文档导航 — tellurion-analytics
@@ -21,6 +21,7 @@ verified-by: QT-43 施工 ①（导航补 §9.8 实现现状）
 | 查某个 port / DTO / 端点的签名、错误语义、版本策略 | [`ARCHITECTURE.md`](ARCHITECTURE.md) §9「接口对表」 |
 | 想知道"现在哪些能跑、哪些只是接口就位" | [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.8「实现现状」 |
 | 改数据流向或顺序 | [`dataflow.md`](dataflow.md) |
+| 起停 / 看日志 / 重放迁移 / 跑集成腿 / 排查上游 | [`runbook.md`](runbook.md) |
 | 想知道"为什么这样设计" | [`adr/`](adr/README.md) |
 | 要做删档 / 迁移 / 流程变更 | [`odr/`](odr/README.md) |
 | 查历史 | [`archive/`](archive/README.md) |
@@ -33,6 +34,7 @@ verified-by: QT-43 施工 ①（导航补 §9.8 实现现状）
 | [`db-schema.md`](db-schema.md) | **表结构唯一真相源** + 所有权声明 | 改表的人 |
 | [`api-schema.md`](api-schema.md) | **对外接口唯一真相源** + 错误码 / 幂等 / 兼容 | 改接口的人 |
 | [`dataflow.md`](dataflow.md) | 数据流向、时序、fail-closed 点、不变量 | 改链路的人 |
+| [`runbook.md`](runbook.md) | 起停、日志、迁移重放、集成腿、上游排查、报告保留期 | 运维 / 值班的人 |
 | [`TASKS.md`](TASKS.md) | 可执行任务（六字段） | 每个人 |
 | [`adr/`](adr/README.md) | 架构决策（只增不删） | 提变更的人 |
 | [`odr/`](odr/README.md) | 运行 / 治理决策（删档、审计、迁移、工具） | 做事的人 |

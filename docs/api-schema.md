@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-07
-verified-by: 2026-11-07 SVC-AN-G1 补 `GET /readyz`（就绪探针：PG + 迁移 + 上游装配，无鉴权不限流）、按身份限流（429 `rate_limited`）、上游 4xx/5xx 映射表（§2.1）、幂等语义写死（§3）与「无列表面」声明（§1）；2026-10-26 H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` 服务间角色入策略表，ADR-0004）与 SVC-AN-G0（`GET /healthz`）
+verified-by: 2026-11-07 SVC-AN-G4 补五类上游失败（401 / 404 / 409 / 503 / 超时）的本仓返回码与重试口径（§2.2，超时 = 出站 10s context 上界）；2026-11-07 SVC-AN-G1 补 `GET /readyz`（就绪探针：PG + 迁移 + 上游装配，无鉴权不限流）、按身份限流（429 `rate_limited`）、上游 4xx/5xx 映射表（§2.1）、幂等语义写死（§3）与「无列表面」声明（§1）；2026-10-26 H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` 服务间角色入策略表，ADR-0004）与 SVC-AN-G0（`GET /healthz`）
 ---
 
 # API Schema — tellurion-analytics
@@ -100,6 +100,24 @@ verified-by: 2026-11-07 SVC-AN-G1 补 `GET /readyz`（就绪探针：PG + 迁移
 | orchestration X5b 查询 | 其他非 2xx / 连接失败 | 保持 `pending`（瞬时故障不写成终态，下次读继续推进） |
 
 **不向上游透传 401/403**：上游凭证配错在调用方看来是 `503`（部署态）或 `409`（数据态），调用方不需要、也不应该知道上游鉴权细节——那是运维面。**唯一例外**是上游 404 的语义差异（结果 = 该 run 不存在；artifact = 该输入缺失），上表已分开。
+
+### 2.2 五类上游失败：本仓返回码与重试口径（SVC-AN-G4 ②）
+
+> 这张表是 §2.1 的**验收切片**：401 / 404 / 409 / 503 / 超时各一行，给本仓码与重试口径。
+> 锚点：`internal/upstream/g4_failure_test.go`（哨兵）、`internal/httpapi/g4_drill_test.go`（wire 码）、
+> `internal/upstream/g4_timeout_test.go`（超时上界）。
+
+| 上游条件 | R1 结果面 | X1b 基准面 | R2 artifact 面 | X5b 队列 | 本仓重试口径 |
+|---|---|---|---|---|---|
+| **401**（凭证错） | `503 dependency_unavailable` | `409 benchmark_data_unavailable` | `503 dependency_unavailable` | Submit → `503`；Status → 保持 `pending` | **不自动重试**：属配置错误，改凭证 / 部署参数后重试 |
+| **404**（run 不存在） | `404 run_not_found` | `409 benchmark_data_unavailable`（基准按 dataset 取，不按 run） | `409 run_result_incomplete` + `missing` | Status 404 ⇒ 报告落 `failed`（终态） | **不重试**：run 不存在是终态 |
+| **409**（结论未就绪 / 上游冲突） | `503 dependency_unavailable` | `409 benchmark_data_unavailable` | `503 dependency_unavailable` | Submit → `503`；Status → 保持 `pending` | **退避重试**：上游尚未定论，属瞬时态 |
+| **503**（上游自身未配） | `503 dependency_unavailable` | `409 benchmark_data_unavailable` | `503 dependency_unavailable` | Submit → `503`；Status → 保持 `pending` | **退避重试**：部署态，补齐上游接线后可恢复 |
+| **超时**（出站 10s 上界） | `503 dependency_unavailable` | `409 benchmark_data_unavailable` | `503 dependency_unavailable` | Submit → `503`；Status → 保持 `pending` | **退避重试**：超时视为上游不可用，不是"该 run 没数据" |
+
+**超时上界**：`internal/upstream` 对**每次**出站请求套 `context.WithTimeout(10s)`（`outboundTimeout`，生产值 10s）。
+它作用在 context 上，因此**即使注入的 `http.Client` 没有 `Timeout`** 也成立；到上界即返回 `503 dependency_unavailable`，
+不无限挂住请求。破坏验证：删掉 `boundedContext` ⇒ `TestG4OutboundRequestHasTimeoutBound` 红。
 
 ## 3. 幂等性与重试
 

@@ -65,6 +65,8 @@ func (q *SensitivityQueue) Submit(ctx context.Context, job analysis.SensitivityJ
 		return "", fmt.Errorf("%w: encode sensitivity submit: %v", analysis.ErrDependencyUnavailable, err)
 	}
 	endpoint := joinURL(q.base, "/api/runs/parents")
+	ctx, cancel := boundedContext(ctx)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("%w: build sensitivity submit: %v", analysis.ErrDependencyUnavailable, err)
@@ -125,6 +127,8 @@ type sensitivityTaskWire struct {
 // Status 读父作业的进度 / 逐点结论。
 func (q *SensitivityQueue) Status(ctx context.Context, parentJobID string) (analysis.SensitivityProgress, error) {
 	endpoint := joinURL(q.base, "/api/runs/parents/"+url.PathEscape(parentJobID))
+	ctx, cancel := boundedContext(ctx)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return analysis.SensitivityProgress{}, fmt.Errorf("%w: build parent status: %v", analysis.ErrDependencyUnavailable, err)

@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-07
-verified-by: SVC-AN-G2（写者 / 读者 / 生命周期成文 + benchmarks 处置 + 保留期 90 天；迁移重放与跨 schema 写护栏见 `internal/analysis/g2_replay_test.go` / `g2_schema_write_guard_test.go`）
+verified-by: SVC-AN-G4（`docs/runbook.md` §6 把 §1.1 的报告体生命周期与 90 天保留期落成运维口径，数值不变）；SVC-AN-G2（写者 / 读者 / 生命周期成文 + benchmarks 处置 + 保留期 90 天；迁移重放与跨 schema 写护栏见 `internal/analysis/g2_replay_test.go` / `g2_schema_write_guard_test.go`）
 ---
 
 # DB Schema — tellurion-analytics

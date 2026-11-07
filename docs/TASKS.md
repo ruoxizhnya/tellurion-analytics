@@ -404,7 +404,9 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
   - **未执行（本单保持 🔶 的唯一原因）**：真 PG 的迁移重放腿 `TestG2MigrationReplayIsStable` **未执行**——本机 `127.0.0.1:5432` 无监听、Docker 引擎不可用、`ANALYTICS_TEST_DSN` 未设，用例如实 `SKIP`。静态护栏腿与文档腿已全部真跑。
   - **边界**：本单只做本仓 schema 自证；`benchmarks` 的写者启用与上游切读归 core / orchestration 各自单。
 
-### SVC-AN-G4 · 服务就绪门 G4：纯函数口径 · 上游失败语义 · runbook（ADR-036）[P1] ⬜
+### SVC-AN-G4 · 服务就绪门 G4：纯函数口径 · 上游失败语义 · runbook（ADR-036）[P1] 🔶
+
+> 2026-11-07 施工：①~⑥ 全部落地并真跑；**真 PG / Docker 容器腿未执行**（本机无 PostgreSQL、Docker 引擎不可用），故按纪律标 🔶，不标 ✅。
 
 - **① 目标**：把「本仓可复现」与「上游挂了会怎样」两件事写成可核对文档并演练一次——本仓的设计承诺是**纯函数**，这条承诺今天没有运维面支撑。
 - **② 上下文**：SYSTEM-DESIGN §4 批量/分析行的关键约束原文：「分析**纯函数**（不读时钟、不读随机，蒙特卡洛必须带 `seed`）」；上游端口未配置时 fail-closed 成 503 `dependency_unavailable`（已落）；`/healthz` 已 200；**缺 `/readyz`（属 G1）、缺超时/重试口径、缺 runbook**（全 workspace `runbook` 只出现在 ADR-036 正文）；出站三条 reader（Result / Benchmark / Artifact）都要求带 Bearer（`internal/upstream/upstream_test.go` 已钉），但超时上界与「上游 5xx 时是否重试」无文档。
@@ -412,6 +414,18 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 - **④ 约束与非目标**：不引 APM；不做高可用/多副本；不把随机性引入（要引入必须带 seed）；不改上游；不在本单实现归因输入生产端。
 - **⑤ 验收**：① 纯函数守卫红/绿各一次（破坏验证：临时加一处 `time.Now()` ⇒ 红，还原 ⇒ 绿）；② 失败语义表五类各有用例或注明原因；③ 超时用例：注入永不响应的假上游 ⇒ 到上界即失败且有码（去掉上界 ⇒ 红）；④ 演练记录有真退出码，且「同输入两次逐位一致」有输出；⑤ runbook 每条命令当场执行；⑥ 三条命令绿。
 - **⑥ 边界**：本仓运维面与不变量守卫；凭证分发归 `tellurion:QT-77`，上游实现归各自仓。
+- **⑦ 施工记录（2026-11-07）**：
+  - **① 纯函数机械守卫**：`internal/analysis/g4_purity_guard_test.go` 的 `TestG4PureFunctionInvariants`，用 `go/parser` / `go/ast` 扫 `internal/analysis` 全部非测试 `.go`：`time.Now` 出现即红，唯一豁免 `service.go`（时钟注入边界，时间戳只进 `created_at` / `updated_at`）；`math/rand` / `math/rand/v2` import 出现即红，唯一豁免 `montecarlo.go`，且该文件必须存在 `rand.New(rand.NewSource(seed))`、禁止 `rand.Intn` 之类全局源包级函数。无新依赖。
+  - **① 破坏验证（真做真还原）**：在 `internal/analysis/metrics.go` 临时加 `var g4Breaker = time.Now()`（含 `"time"` import）⇒ 红：`g4_purity_guard_test.go:93: 本仓计算包必须保持纯函数… metrics.go:9 读取系统时钟 time.Now（计算必须是输入的纯函数）`，`go test ./internal/analysis -run TestG4PureFunctionInvariants -count=1` 退出码 **1**。用备份逐字节还原，还原前后 sha256 同为 **`17C90C969087C0FCE7591F1895F05EAEA2BFD4AA1380F472055894B482160D9C`**，复绿（退出码 0）。
+  - **② 五类失败语义**：口径表落在 `docs/api-schema.md` §2.2（401 / 404 / 409 / 503 / 超时 × R1 / X1b / R2 / X5b + 是否重试）。用例：`internal/upstream/g4_failure_test.go` 钉哨兵（401/409/503 → `ErrDependencyUnavailable`，404 → `ErrRunNotFound`；基准面任意非 2xx → `ErrBenchmarkDataUnavailable`；artifact 404 → `IncompleteError{Missing:"holdings"}`），`internal/httpapi/g4_drill_test.go` 的 `TestG4UpstreamFailureWireCodes` 钉 wire 码（上游 401/409/503 → HTTP 503 `dependency_unavailable`，上游 404 → HTTP 404 `run_not_found`）。超时由 ③ 的用例覆盖，折算同 `ErrDependencyUnavailable` → 503。
+  - **③ 出站超时上界**：`internal/upstream` 新增 `outboundTimeout`（生产值 **10s**）与 `boundedContext`，`ResultReader.GetResult`、`BenchmarkReader.getJSON`、`ArtifactReader.getJSON`、`SensitivityQueue.Submit` / `Status` 每次请求都套 `context.WithTimeout`——**注入的 `http.Client` 没有 `Timeout` 也兜得住**。用例 `TestG4OutboundRequestHasTimeoutBound`：永不响应的假上游 + `&http.Client{}`，100ms 上界实跑输出 `failed after 100ms with dependency unavailable: … context deadline exceeded`。
+  - **③ 破坏验证（真做真还原）**：删掉 `ResultReader.GetResult` 的 `boundedContext` 两行 ⇒ 红：`g4_timeout_test.go:69: GetResult did not return within 2s: 出站请求缺少显式超时上界…`，退出码 **1**。逐字节还原后 sha256 同为 **`63D865CE93E424AE0C6AED9A195A9DB2D80253BE14F68C13D5EECE6BD56D5EAC`**，复绿（退出码 0）。
+  - **④ 报告体生命周期与保留期**：`docs/runbook.md` §6 成文，数值直接引用 `docs/db-schema.md` §1.1 的 **90 天**（与 SVC-AN-G2 ④ 同数，未自造）；`db-schema.md` frontmatter 记 G4 引用，数值未改。
+  - **⑤ runbook**：新建 `docs/runbook.md`（起停 / 看日志 / 重放迁移 / `ANALYTICS_TEST_DSN` 集成腿 / 上游不可达排查顺序 / 生命周期 / 演练记录）。实跑：`go build` 后 `Start-Process` 起 `127.0.0.1:18087`，`/healthz` = **200 ok**，`/readyz` = **503** + `{"status":"not_ready","store":"memory","missing":["store: postgres (set -dsn / ANALYTICS_DATABASE_DSN)"]}`；`Stop-Process` 后端口不再监听。**未执行**：带 `ANALYTICS_TEST_DSN` 的 PG 起停 / 迁移重放（本机无 PG）；runbook 中这些命令已标「未执行」。
+  - **⑥ 演练（httptest 真跑）**：`TestG4DrillUpstreamOutageAndDeterministicReplay`。阶段 1 上游 handler hijack 并关闭 TCP 连接 ⇒ `HTTP 503 code=dependency_unavailable`（error 含 `EOF`），`PutReport=0`（无半成品）；阶段 2 恢复后同输入两次 ⇒ `report_id=76d8f1cc2cb77d4ef385921009eabf38c593293be8c78f53c751ba054cff9d9a`、两次 `len=569`、sha256 均为 **`e020eea2268563b09aa5769642f564017aeaf339872d65868a37144101620112`**、`identical bytes=true`、`PutReport=1`。
+  - **门禁（真实退出码）**：`gofmt -l .` 无输出（退出码 **0**）；`go build ./...`=**0**；`go vet ./...`=**0**；`go test ./... -count=1`=**0**（`cmd/analyticsservice` / `internal/analysis` / `internal/httpapi` / `internal/upstream` 全 ok）。
+  - **未执行（本单保持 🔶 的唯一原因）**：真 PG 的迁移重放 / PG Store 用例与 `ANALYTICS_TEST_DSN` 集成腿 **未执行**——本机 `127.0.0.1:5432` 无监听、Docker 引擎不可用；`TestG2MigrationReplayIsStable` 如实 `SKIP`（`ANALYTICS_TEST_DSN is not set`，退出码 0）。未引 APM、未加依赖、未引入无 seed 随机性、未改上游、未动其它仓。
+  - **边界**：本单只做本仓运维面与不变量守卫；凭证分发归 `tellurion:QT-77`，上游实现归各自仓。
 
 ## 施工序（候选单，开工前必须展开成六字段）
 

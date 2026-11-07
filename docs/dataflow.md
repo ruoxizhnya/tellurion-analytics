@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-25
-verified-by: R1 换面（读取边 `ResultReader` = core 持久读面；队列态 404 入失败模式表）
+last-verified: 2026-11-07
+verified-by: SVC-AN-G4（读取边补出站 10s 上界 + 五类失败口径指针 §2.2）；R1 换面（读取边 `ResultReader` = core 持久读面；队列态 404 入失败模式表）
 ---
 
 # Dataflow — tellurion-analytics
@@ -48,6 +48,8 @@ verified-by: R1 换面（读取边 `ResultReader` = core 持久读面；队列�
 | `BenchmarkReader` | tellurion-data X1b：`GET /datasets/resolve` → `GET /datasets/{hash}` | 任何取不到 / basis 不一致 → `benchmark_data_unavailable` |
 | `HoldingsProvider` / `FactorExposureProvider` | interim artifact 面：`GET /runs/{id}/portfolio-snapshot`、`/runs/{id}/factor-exposures` | 404 / 空体 → `run_result_incomplete`（点名缺哪个）；网络 / 5xx → `dependency_unavailable` |
 | `SensitivityQueue` | X5b：`POST /api/runs/parents`（batch）+ `GET /api/runs/parents/{id}`（counts + `summary.Tasks`，无 summary 回落 `children`） | 404 → 父作业不存在（报告 failed，终态）；网络 / 非 2xx → `dependency_unavailable`（报告保持 pending，下次读取重试） |
+
+**出站上界（SVC-AN-G4 ③）**：每个读取边请求都套 `context.WithTimeout(10s)`（`internal/upstream.outboundTimeout`），到上界即按上表折算失败语义；即使注入的 `http.Client` 没有 `Timeout` 也成立。五类上游失败（401 / 404 / 409 / 503 / 超时）的码与重试口径见 `api-schema.md` §2.2。
 
 **状态推进**：同步端点一步到 `completed`；异步端点先落 `pending`，由执行器推进到 `completed` 或 `failed`。sensitivity 的推进器是**读路径**（`GET /reports/{id}` 查父作业），没有后台 goroutine。`completed` 是**终态、不可变**——同键重复提交返回已存报告（字节一致）。
 
