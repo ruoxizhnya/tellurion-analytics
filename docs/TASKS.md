@@ -387,7 +387,12 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
   - **文档**：`docs/api-schema.md`（§1 `/readyz` + 无列表面、§2 429 行、§2.1 上游折算表、§3 幂等冻结、§4 版本策略、§7 限流与 kit 缺口订正）、本节、`AGENTS.md` §1。
   - **门禁（真实退出码）**：`gofmt -l .` 无输出、`go build ./...`=0、`go vet ./...`=0、`go test ./... -count=1`=0（`cmd/analyticsservice` / `internal/analysis` / `internal/httpapi` / `internal/upstream` 全 ok）。
 
-### SVC-AN-G2 · 服务就绪门 G2：`analysis.*` 唯一 writer 与可重放迁移（ADR-036）[P1] 🔶（2026-11-07 施工；真 PG 重放腿未执行）
+### SVC-AN-G2 · 服务就绪门 G2：`analysis.*` 唯一 writer 与可重放迁移（ADR-036）[P1] ✅（2026-11-07 真库重放腿补跑通过）
+
+> **2026-11-07 真库腿补跑（✅）**：便携 PostgreSQL 16.2 @ `127.0.0.1:55432`；
+> `ANALYTICS_TEST_DSN='postgres://postgres@127.0.0.1:55432/tellurion_analytics_test?sslmode=disable' go test ./internal/analysis -run TestG2MigrationReplayIsStable -v -count=1`
+> → `--- PASS: TestG2MigrationReplayIsStable (0.04s)`、退出码 0；输出含两次一致的五表行数（`analysis.attribution 3`、`benchmarks 3`、`mc_runs 2`、`reports 13`、`sensitivity_runs 1`）与索引集。
+> 同一 DSN 下 `go test ./... -count=1` 退出码 0；⑤①~⑤⑤ 均有真实输出。Docker/容器腿不属于本单。
 
 - **① 目标**：五张 `analysis.*` 表在本仓自证「只有我写、迁移可重放」，并把「谁真的在写 `benchmarks`」这条空账填成有答案的行。
 - **② 上下文**：`internal/analysis/pgstore.go` 有 PG 实现与 `analysis.*` DDL，`ANALYTICS_TEST_DSN` 腿可选跑；**实测写面存在但生产调用为零**：`pgstore.go:196` 有 `INSERT INTO analysis.benchmarks`，而 core 侧材料 §4.5 明写「analytics 的 `analysis.benchmarks` 写方法生产零调用 ⇒ 先要有真写者」（本仓台账亦登记基准面依赖 X1b）⇒ 「唯一 writer」当前是**唯一 = 零**，与 ADR-036 §5.2 的「一个 schema 只有一个 owner」不冲突但与「有数据」冲突，必须在 `db-schema.md` 里写明；本仓对上游只读（AGENTS §3 硬约束）。
