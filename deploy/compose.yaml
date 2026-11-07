@@ -20,6 +20,12 @@ services:
       ANALYTICS_ARTIFACT_URL: ${ANALYTICS_ARTIFACT_URL:-http://host.docker.internal:8088}
       ANALYTICS_ORCHESTRATION_URL: ${ANALYTICS_ORCHESTRATION_URL:-http://host.docker.internal:8088}
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      # 凭证来源（QT-77）：analytics 是**发送方**，三个 token 由部署方显式签发
+      # （JWT_SECRET=... go run ./tools/issue_service_token.go -sub service:analytics），
+      # 仓库里只有空占位；口径见 tellurion:docs/SPEC.md 的「服务间凭证」节。
+      DATA_SERVICE_TOKEN: ${DATA_SERVICE_TOKEN:-}
+      ANALYTICS_CORE_TOKEN: ${ANALYTICS_CORE_TOKEN:-}
+      ANALYTICS_ARTIFACT_TOKEN: ${ANALYTICS_ARTIFACT_TOKEN:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
