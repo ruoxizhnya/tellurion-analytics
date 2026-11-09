@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-09
-verified-by: SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）
+last-verified: 2026-11-10
+verified-by: `SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 analytics 零命中，且 `SVC-CORE-AN-RETIRE` 结论为「保留并冻结」+ K7 生产写者为 0 ⇒ 无消费者，维持 ⛔）；QT-43 复核（未落项与 2026-10-26 一字不差）；SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -53,6 +53,8 @@ verified-by: SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token�
 > - **如实登记**：`go.mod` 无 `tellurion-contracts`，本轮未引入；未动 core `/report` 与分析口径。
 >
 > **2026-11-09 调用方腿（`SVC-ORCH-G1` 全量 R5 的跨仓部分）**：本仓是 orchestration 的调用方（`POST /api/runs/parents`、`GET /api/runs/parents/{id}`）。`internal/upstream` 新增 `NewSensitivityQueueWithToken`（旧构造函数保留 = 空 token），`cmd/analyticsservice` 新增 `-orchestration-token` / `ANALYTICS_ORCHESTRATION_TOKEN`（缺省读 `ORCHESTRATION_SERVICE_TOKEN`）；`docker-compose.services.yml` 注入空占位。门禁：`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全 0。**token 签发与分发仍不在本仓**（同 ④）。
+
+> **⛔ 前置复核（2026-11-10，仍未开工）**：`tellurion` 非测试 Go 文件对 `analytics-service` / `ANALYTICS_URL` / `8087` **零命中** ⇒ core 仍无 HTTP 消费者；同轮 core `SVC-CORE-AN-RETIRE` 收口结论 = **保留并冻结**（`pkg/backtest/metrics|reporting` 生产 import 恰 3 条、冻结快照护栏），并明确 K7「analytics 的 `analysis.benchmarks` 生产写者为 0」未解除 ⇒ ③「core 加 HTTP 客户端 + 切读」与 ⑤「core 重复实现删除」均不成立。本单按 ④「不在没有消费者时宣称 G3」**如实维持 ⛔**，不硬翻。
 
 ### QT-43 · X4 分析服务（基准 / 归因 / 敏感性 / 蒙特卡洛）[P1] 🔶
 
@@ -365,6 +367,8 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 5. **本轮仍没有真 core 进程 + 真 PG 的 invalid 行端到端**（沿用 R1 换面记录的缺口，本轮两腿都没碰这条链路）。
 
 **验收现状**：QT-43 的 ⑤ 三条判据维持**真库 E2E** 层成立；本单仍保持 🔶，未落项收窄为「token 分发的跨仓腿（R1 的两条 core 侧残留偏差、真 core 进程的 invalid 行端到端）」——原列在第 3 项的「kit 的 service token subject 缺口」已由 kit `KT-11` / `v0.1.4` 闭合、本仓 pin 已升（见未落项第 2 条）。
+
+**2026-11-10 复核（无变化，仍 🔶）**：① 核心消费侧仍不存在（core 非测试 Go 对 analytics 零命中，见 `SVC-AN-G3` 同日复核）；② core 的 `SVC-CORE-AN-RETIRE` 结论是「保留并冻结」而非迁移，故 R1 的两条读面偏差仍未被 core 侧裁决修改；③ token 跨仓分发腿本仓无部署面，仍不在本仓。④ 本仓门禁未变（上轮 WSL 真库全绿）。本单未落项与上条一字不差，不新增虚假进度。
 
 ---
 
