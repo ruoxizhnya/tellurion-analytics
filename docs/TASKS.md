@@ -368,6 +368,8 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 
 **验收现状**：QT-43 的 ⑤ 三条判据维持**真库 E2E** 层成立；本单仍保持 🔶，未落项收窄为「token 分发的跨仓腿 + R1 的两条 core 侧残留偏差」——原列在第 3 项的「kit 的 service token subject 缺口」已由 kit `KT-11` / `v0.1.4` 闭合、本仓 pin 已升（见未落项第 2 条）；原列在这里的「真 core 进程的 invalid 行端到端」已于 2026-11-10 补跑（第 5 项）。
 
+**2026-11-10 末次复核（R1 两条 core 侧残留偏差：卡点已定位到具体 API，仍 🔶）**：读 core `cmd/analysis/handlers_backtest.go` 的 `/api/backtest/:id/report` 持久腿——`job == nil || job.Status != "completed"` 一律 404，即 pending / running / failed 都被读成「不存在」，与第三轮裁决 ⑲「结论态放行（pending/running 409 `run_result_incomplete`、failed 409 `run_result_failed`、404 只给不存在）」不符。**修它需要自定义错误码**，而 kit `httpserver` 只有 `Fail` / `Error` / `Wrap` / `FailCause`，4xx 的 `code` 一律由 `codeForStatus` 派生（`conflict`），**没有注入自定义 code 的出口**（`errors.go:29-39` / `:86-134`）。⇒ 要落 ⑲ 必须先在 kit 新增公共 API（如 `FailCode`）+ 发版 + core/本仓升 pin，属跨仓新单，不在 QT-43 范围；本仓 `internal/upstream` 也只能把 core 的 409 映射成 `ErrDependencyUnavailable`（当前 404→`ErrRunNotFound`、其余非 2xx→503，见 `upstream.go`）。Migration 059 的存量回填（pre-migration 行一律 `completed`）无法反推真实 invalid，属历史数据不可逆。**据此本单不翻 ✅，卡点从「两条 core 侧残留偏差」精确为「kit 缺自定义错误码出口 + 历史回填不可逆」**。
+
 **2026-11-10 复核（无变化，仍 🔶）**：① 核心消费侧仍不存在（core 非测试 Go 对 analytics 零命中，见 `SVC-AN-G3` 同日复核）；② core 的 `SVC-CORE-AN-RETIRE` 结论是「保留并冻结」而非迁移，故 R1 的两条读面偏差仍未被 core 侧裁决修改；③ token 跨仓分发腿本仓无部署面，仍不在本仓。④ 本仓门禁未变（上轮 WSL 真库全绿）。本单未落项与上条一字不差，不新增虚假进度。**（同日后半段已补「真 core + 真 PG invalid 行端到端」，见下条；本条是当次复核的快照，不据此判断当前未落项。）**
 
 #### 施工记录（2026-11-10，真 core 进程 + 真 PG 的 invalid 行端到端）
