@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-07
-verified-by: SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）
+last-verified: 2026-11-09
+verified-by: SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -51,6 +51,8 @@ verified-by: SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：
 > - **token 跨仓分发未落**：本仓只校验 token，签发与分发在 core / kit；跨仓腿未闭合。
 > - **R1 残留**：读面「结论态放行」改在 core（第三轮裁决 ⑲），本仓 wire 码就绪但 core 侧未切。
 > - **如实登记**：`go.mod` 无 `tellurion-contracts`，本轮未引入；未动 core `/report` 与分析口径。
+>
+> **2026-11-09 调用方腿（`SVC-ORCH-G1` 全量 R5 的跨仓部分）**：本仓是 orchestration 的调用方（`POST /api/runs/parents`、`GET /api/runs/parents/{id}`）。`internal/upstream` 新增 `NewSensitivityQueueWithToken`（旧构造函数保留 = 空 token），`cmd/analyticsservice` 新增 `-orchestration-token` / `ANALYTICS_ORCHESTRATION_TOKEN`（缺省读 `ORCHESTRATION_SERVICE_TOKEN`）；`docker-compose.services.yml` 注入空占位。门禁：`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全 0。**token 签发与分发仍不在本仓**（同 ④）。
 
 ### QT-43 · X4 分析服务（基准 / 归因 / 敏感性 / 蒙特卡洛）[P1] 🔶
 

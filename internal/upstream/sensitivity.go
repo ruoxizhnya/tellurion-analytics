@@ -26,13 +26,26 @@ import (
 type SensitivityQueue struct {
 	base   string
 	client *http.Client
+	token  string
 }
 
 var _ analysis.SensitivityQueue = (*SensitivityQueue)(nil)
 
 // NewSensitivityQueue 构造父作业适配器；base 是 orchestration 的根 URL。
 func NewSensitivityQueue(base string, client *http.Client) *SensitivityQueue {
-	return &SensitivityQueue{base: strings.TrimRight(base, "/"), client: clientOr(client)}
+	return NewSensitivityQueueWithToken(base, client, "")
+}
+
+// NewSensitivityQueueWithToken 同上，并携带 orchestration 的 service token
+// （全量 R5 后 `/api/runs/parents` 需要 service 角色）。
+func NewSensitivityQueueWithToken(base string, client *http.Client, token string) *SensitivityQueue {
+	return &SensitivityQueue{base: strings.TrimRight(base, "/"), client: clientOr(client), token: strings.TrimSpace(token)}
+}
+
+func (q *SensitivityQueue) authorize(req *http.Request) {
+	if q.token != "" {
+		req.Header.Set("Authorization", "Bearer "+q.token)
+	}
 }
 
 type sensitivitySubmitPayload struct {
@@ -72,6 +85,7 @@ func (q *SensitivityQueue) Submit(ctx context.Context, job analysis.SensitivityJ
 		return "", fmt.Errorf("%w: build sensitivity submit: %v", analysis.ErrDependencyUnavailable, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	q.authorize(req)
 	resp, err := q.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("%w: submit sensitivity parent: %v", analysis.ErrDependencyUnavailable, err)
@@ -133,6 +147,7 @@ func (q *SensitivityQueue) Status(ctx context.Context, parentJobID string) (anal
 	if err != nil {
 		return analysis.SensitivityProgress{}, fmt.Errorf("%w: build parent status: %v", analysis.ErrDependencyUnavailable, err)
 	}
+	q.authorize(req)
 	resp, err := q.client.Do(req)
 	if err != nil {
 		return analysis.SensitivityProgress{}, fmt.Errorf("%w: get parent status: %v", analysis.ErrDependencyUnavailable, err)

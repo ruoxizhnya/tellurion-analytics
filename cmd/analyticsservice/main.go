@@ -50,6 +50,8 @@ func main() {
 		"service token for tellurion-data upstream (empty = no Authorization header)")
 	artifactToken := flag.String("artifact-token", envFirst("ANALYTICS_ARTIFACT_TOKEN"),
 		"service token for artifact upstream (empty = fall back to -core-token)")
+	orchestrationToken := flag.String("orchestration-token", envFirst("ANALYTICS_ORCHESTRATION_TOKEN", "ORCHESTRATION_SERVICE_TOKEN"),
+		"service token for orchestration upstream (empty = no Authorization header)")
 	exposure := flag.String("insecure-exposure", os.Getenv("AUTH_INSECURE_EXPOSURE"),
 		"explicit exposure declaration for open access on a non-loopback bind (only loopback-published is accepted)")
 	flag.Parse()
@@ -102,7 +104,7 @@ func main() {
 		opts.Factors = artifacts
 	}
 	if *orchestrationURL != "" {
-		opts.Queue = upstream.NewSensitivityQueue(*orchestrationURL, nil)
+		opts.Queue = upstream.NewSensitivityQueueWithToken(*orchestrationURL, nil, *orchestrationToken)
 	}
 	log.Printf("analyticsservice: readers wired result=%t benchmark=%t holdings=%t factors=%t queue=%t",
 		opts.Results != nil, opts.Benchmarks != nil, opts.Holdings != nil, opts.Factors != nil, opts.Queue != nil)
