@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-10
-verified-by: `SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 analytics 零命中，且 `SVC-CORE-AN-RETIRE` 结论为「保留并冻结」+ K7 生产写者为 0 ⇒ 无消费者，维持 ⛔）；QT-43 复核（未落项与 2026-10-26 一字不差）；SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）
+verified-by: `SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 analytics 零命中，且 `SVC-CORE-AN-RETIRE` 结论为「保留并冻结」+ K7 生产写者为 0 ⇒ 无消费者，维持 ⛔）；QT-43 真 core 进程 + 真 PG invalid 行端到端实跑（2026-11-10：core 持久读面 200 `status=invalid` → 本仓 409 `run_result_invalid` + reasons 原样透传，反向对照 404 / 503 各一条，库与进程已清）；QT-43 复核（未落项与 2026-10-26 一字不差）；SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -369,6 +369,31 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 **验收现状**：QT-43 的 ⑤ 三条判据维持**真库 E2E** 层成立；本单仍保持 🔶，未落项收窄为「token 分发的跨仓腿（R1 的两条 core 侧残留偏差、真 core 进程的 invalid 行端到端）」——原列在第 3 项的「kit 的 service token subject 缺口」已由 kit `KT-11` / `v0.1.4` 闭合、本仓 pin 已升（见未落项第 2 条）。
 
 **2026-11-10 复核（无变化，仍 🔶）**：① 核心消费侧仍不存在（core 非测试 Go 对 analytics 零命中，见 `SVC-AN-G3` 同日复核）；② core 的 `SVC-CORE-AN-RETIRE` 结论是「保留并冻结」而非迁移，故 R1 的两条读面偏差仍未被 core 侧裁决修改；③ token 跨仓分发腿本仓无部署面，仍不在本仓。④ 本仓门禁未变（上轮 WSL 真库全绿）。本单未落项与上条一字不差，不新增虚假进度。
+
+#### 施工记录（2026-11-10，真 core 进程 + 真 PG 的 invalid 行端到端）
+
+> 目标：把上一条未落项第 5 条「本轮仍没有真 core 进程 + 真 PG 的 invalid 行端到端」从「未证」变成「有当前证据」。**不翻本单 ✅**——R1 的两条 core 侧残留偏差、token 跨仓分发腿、contracts 迁移仍在。
+
+**环境**：Windows PowerShell 5 / Go 1.25.14 / `CGO_ENABLED=0`；真 PostgreSQL 16.15 @ `127.0.0.1:5432`（用户 `postgres`）；core `dd21d0c`、本仓 `690dfa8`。
+
+**实跑步骤与真实输出**
+
+1. 隔离库：`tellurion_core_invalid_e2e` + `tellurion_analytics_invalid_e2e`（两条 `CREATE DATABASE`，`SETUP_EXIT=0`）。
+2. 真 core：`go build -o …\analysis.exe ./cmd/analysis`（`CORE_BUILD_EXIT=0`），以 `DATABASE_URL=postgres://…/tellurion_core_invalid_e2e`、`SERVER_HOST=127.0.0.1`、`SERVER_PORT=18085`、`AUTH_INSECURE=true`、`RISK_SERVICE_RESOLVE_ENABLED=false`（本地无 risk 服务，走配置注释里的 builtin 兜底档）、`ALERT_ENABLED=false` 起进程；`GET /health` → **200** `{"service":"analysis-service","status":"healthy",…}`。
+3. 直插结果面 invalid 行（`run.backtest_results`，Migration 063 的表）：`result_status='invalid'`、`result={"status":"invalid","invalid_reasons":["data_gap_skipped"]}` → `INSERT 0 1`，psql 读回 `e2e-invalid-20261110|invalid|{"status": "invalid", "invalid_reasons": ["data_gap_skipped"]}`。
+4. core 持久读面：`GET /api/backtest/e2e-invalid-20261110/report` → **200** `{"invalid_reasons":["data_gap_skipped"],"status":"invalid"}`（K9 结论列生效，跑完但无效不再 404）。
+5. 真 analytics：`go build -o …\analyticsservice.exe ./cmd/analyticsservice`（`AN_BUILD_EXIT=0`），`-addr 127.0.0.1:18087 -dsn …tellurion_analytics_invalid_e2e -core-url http://127.0.0.1:18085`；启动日志 `postgres store ready (analysis.* migrated)`、`readers wired result=true benchmark=false holdings=false factors=false queue=false`；`/readyz` → **503** `{"status":"not_ready","store":"postgres","missing":["benchmarks","holdings","factors","queue"]}`（PG 与迁移已就绪，未接的三个上游如实点名；本腿只依赖 result 面）。
+6. 端到端：`POST /api/analysis/metrics {"run_id":"e2e-invalid-20261110"}` → **409** `{"error":"run result invalid: [data_gap_skipped]","code":"run_result_invalid","invalid_reasons":["data_gap_skipped"]}`。
+7. 反向对照（证明 409 不是兜底）：
+   - 不存在的 run：同一端点 → **404** `{"error":"run not found","code":"run_not_found"}`。
+   - 停掉真 core 后再打同一 run → **503** `{"error":"dependency unavailable: … dial tcp 127.0.0.1:18085: connectex: No connection could be made …","code":"dependency_unavailable"}` ⇒ 上一条 409 确实穿真实 HTTP 到 core、再读真实 PG 行。
+8. 清场：停两个进程（`Test-NetConnection` 18085 / 18087 均 `False`）；`DROP DATABASE … WITH (FORCE)` 两库（`DROP_EXIT=0`，`pg_database` 复查无残留）；临时目录（二进制 / 日志 / 请求响应体）已删。
+
+**结论与边界**
+
+- 「真 core 进程 + 真 PG 的 invalid 行 → 本仓 409 `run_result_invalid` + reasons 原样透传」这条链**已有当前证据**，上一条未落项第 5 条据此结清。
+- **仍未证 / 不在本仓**：① `pending` / `running` 与引擎故障行仍读成 404（core 队列态放行，R1 偏差①）；② Migration 059 回填的存量 invalid 读不回（R1 偏差②）；③ token 跨仓签发 / 分发；④ R2 不迁 contracts（owner 已裁、守卫在位）。本单仍 🔶。
+- 可复现命令已写进 `docs/runbook.md` §9。本腿**不产生自动化守卫**：单仓 checkout 拿不到 core 源码 / 二进制，跨仓 e2e 不进本仓 CI；core overlay 若变，`internal/upstream/upstream.go` 的出处注释是唯一提醒。
 
 ---
 

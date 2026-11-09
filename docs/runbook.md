@@ -1,13 +1,17 @@
 ---
 status: active
-last-verified: 2026-11-07
-verified-by: SVC-AN-G4 ⑥（起停 / 日志 / 迁移重放 / 集成腿 / 上游排查 / 报告保留期；起停与探针命令在本机 PowerShell 5 实跑）
+last-verified: 2026-11-10
+verified-by: SVC-AN-G4 ⑥（起停 / 日志 / 迁移重放 / 集成腿 / 上游排查 / 报告保留期；起停与探针命令在本机 PowerShell 5 实跑）；QT-43 真 core + 真 PG 的 invalid 行端到端（2026-11-10，§9：真 core `:18085` + 真 PG 16.15 + 真本仓 `:18087`，200 invalid → 409，反向 404 / 503，库与进程已清）
 ---
 
 # Runbook — tellurion-analytics
 
 > 本文只写**本仓**怎么起停、怎么看、怎么排查。接口语义读 `api-schema.md`，表结构读 `db-schema.md`，
-> 数据流向读 `dataflow.md`。本机没有 PG / Docker 引擎，凡标「未执行」的步骤都是**没有真跑**，不要当成已验证。
+> 数据流向读 `dataflow.md`。
+>
+> **环境更正（2026-11-10）**：本机现在有**真 PostgreSQL 16.15**（`127.0.0.1:5432`，`psql` 在
+> `C:\Program Files\PostgreSQL\16\bin`）；Docker 引擎仍不可用。下文凡写「本机未执行（无 PostgreSQL）」
+> 的段落都是**当时的历史记录**，真库腿的当前证据在 `docs/TASKS.md` 各单与本文 §9，不要按旧句判断「没验证过」。
 
 ## 1. 起停
 
@@ -207,4 +211,63 @@ go vet ./...
 go test ./... -count=1
 ```
 
-四条退出码见 `docs/TASKS.md` SVC-AN-G4 ⑦；`gofmt -l .` 无输出。**真库 / 容器腿未执行**（本机无 PG、Docker 引擎不可用）。
+四条退出码见 `docs/TASKS.md` SVC-AN-G4 ⑦；`gofmt -l .` 无输出。**容器腿未执行**（Docker 引擎不可用）；
+真库腿见 `docs/TASKS.md` 的 SVC-AN-G1/G2/G4 记录与本文 §9。
+
+## 9. 真 core + 真 PG 的 invalid 行端到端（2026-11-10 实跑）
+
+验的是 QT-43 的 R1 读面：core 的 `GET /api/backtest/{id}/report` 用 `run.backtest_results.result_status`
+作结论轴，「跑完但无效」返回 200 + `status=invalid`，本仓据此 409 而不是 404。
+
+```powershell
+$env:PGPASSWORD='postgres'; $psql='C:\Program Files\PostgreSQL\16\bin\psql.exe'
+# 1) 两个隔离库（别复用 tellurion / tellurion_analytics）
+& $psql -U postgres -h 127.0.0.1 -c "CREATE DATABASE tellurion_core_invalid_e2e"
+& $psql -U postgres -h 127.0.0.1 -c "CREATE DATABASE tellurion_analytics_invalid_e2e"
+
+# 2) 真 core（在 tellurion 仓根；迁移随 NewPostgresStore 自动执行）
+$env:DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/tellurion_core_invalid_e2e?sslmode=disable'
+$env:SERVER_HOST='127.0.0.1'; $env:SERVER_PORT='18085'; $env:AUTH_INSECURE='true'
+$env:RISK_SERVICE_RESOLVE_ENABLED='false'; $env:ALERT_ENABLED='false'
+go build -o "$env:TEMP\analysis.exe" .\cmd\analysis
+& "$env:TEMP\analysis.exe"      # 另开窗口；GET /health 期望 200
+
+# 3) 直插 invalid 行（psql -c 传 JSON 在 PowerShell 5 会被吃引号 ⇒ 写 .sql 文件用 -f；
+#    用 WriteAllText 避免 Set-Content -Encoding UTF8 在 PS5 写入 BOM，psql 会把 BOM 当语法错）
+$sql = @'
+INSERT INTO run.backtest_results (run_id, result_status, result)
+VALUES ('e2e-invalid-20261110', 'invalid',
+        '{"status":"invalid","invalid_reasons":["data_gap_skipped"]}'::jsonb)
+ON CONFLICT (run_id) DO UPDATE SET result_status=EXCLUDED.result_status, result=EXCLUDED.result;
+'@
+[System.IO.File]::WriteAllText("$env:TEMP\insert_invalid.sql", $sql, (New-Object System.Text.UTF8Encoding($false)))
+& $psql -U postgres -h 127.0.0.1 -d tellurion_core_invalid_e2e -f "$env:TEMP\insert_invalid.sql"
+
+# 4) core 持久读面
+curl.exe -s http://127.0.0.1:18085/api/backtest/e2e-invalid-20261110/report
+#    → {"invalid_reasons":["data_gap_skipped"],"status":"invalid"}   HTTP 200
+
+# 5) 真本仓（在 tellurion-analytics 仓根）
+go build -o "$env:TEMP\analyticsservice.exe" .\cmd\analyticsservice
+& "$env:TEMP\analyticsservice.exe" -addr 127.0.0.1:18087 `
+  -dsn 'postgres://postgres:postgres@127.0.0.1:5432/tellurion_analytics_invalid_e2e?sslmode=disable' `
+  -core-url 'http://127.0.0.1:18085'
+curl.exe -s -o "$env:TEMP\metrics.json" -w "%{http_code}" -X POST -H "Content-Type: application/json" `
+  --data-binary '{"run_id":"e2e-invalid-20261110"}' http://127.0.0.1:18087/api/analysis/metrics
+#    → 409 {"code":"run_result_invalid","invalid_reasons":["data_gap_skipped"], ...}
+```
+
+反向对照（各一条，证明 409 不是兜底）：同一端点打不存在的 `run_id` → **404** `run_not_found`；
+停掉 core 再打同一 `run_id` → **503** `dependency_unavailable`（错误串里带 `dial tcp 127.0.0.1:18085`）。
+
+清场：
+
+```powershell
+& $psql -U postgres -h 127.0.0.1 -c "DROP DATABASE IF EXISTS tellurion_core_invalid_e2e WITH (FORCE)"
+& $psql -U postgres -h 127.0.0.1 -c "DROP DATABASE IF EXISTS tellurion_analytics_invalid_e2e WITH (FORCE)"
+Remove-Item "$env:TEMP\analysis.exe","$env:TEMP\analyticsservice.exe","$env:TEMP\insert_invalid.sql","$env:TEMP\metrics.json"
+```
+
+边界：这条腿**不覆盖** `pending` / `running` 与引擎故障行（core 仍按队列态 404，R1 偏差①）、
+Migration 059 回填的存量 invalid（R1 偏差②）、token 签发 / 分发。本仓 `/readyz` 在只接 result 面时
+仍会 503 并点名其余三个上游，这是**预期**，不是故障。
