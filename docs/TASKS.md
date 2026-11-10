@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-10
-verified-by: QT-43 收口 ✅（2026-11-10：⑤ 三条判据逐条点名用例 + 真库/真 core 腿均已成立；剩余项逐条定性为 ⑥ 边界外或不可逆历史数据——token 跨仓分发、Migration 059 存量回填、R2 owner 已裁；SVC-AN-G3 维持 ⛔）；R1 偏差①收口（2026-11-10：core K4 按裁决 ⑲ 落地 404 `run_not_found` / 409 `run_result_incomplete` / 409 `run_result_failed` 三态码，本仓 `ResultReader` 按契约 code 映射、未知 409 fail-closed；3 条新用例 + 一条破坏验证真做真还原）；`SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 analytics 零命中，且 `SVC-CORE-AN-RETIRE` 结论为「保留并冻结」+ K7 生产写者为 0 ⇒ 无消费者，维持 ⛔）；QT-43 真 core 进程 + 真 PG invalid 行端到端实跑（2026-11-10：core 持久读面 200 `status=invalid` → 本仓 409 `run_result_invalid` + reasons 原样透传，反向对照 404 / 503 各一条，库与进程已清）；QT-43 复核（未落项与 2026-10-26 一字不差）；SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）
+verified-by: QT-43 收口 ✅（2026-11-10：⑤ 三条判据逐条点名用例 + 真库/真 core 腿均已成立；剩余项逐条定性为 ⑥ 边界外或不可逆历史数据——token 跨仓分发、Migration 059 存量回填、R2 owner 已裁；SVC-AN-G3 维持 ⛔）；R1 偏差①收口（2026-11-10：core K4 按裁决 ⑲ 落地 404 `run_not_found` / 409 `run_result_incomplete` / 409 `run_result_failed` 三态码，本仓 `ResultReader` 按契约 code 映射、未知 409 fail-closed；3 条新用例 + 一条破坏验证真做真还原）；`SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 analytics 零命中，且 `SVC-CORE-AN-RETIRE` 结论为「保留并冻结」+ K7 生产写者为 0 ⇒ 无消费者，维持 ⛔）；QT-43 真 core 进程 + 真 PG invalid 行端到端实跑（2026-11-10：core 持久读面 200 `status=invalid` → 本仓 409 `run_result_invalid` + reasons 原样透传，反向对照 404 / 503 各一条，库与进程已清）；QT-43 复核（未落项与 2026-10-26 一字不差）；SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）；**2026-11-10 主任裁决 A（ADR-0005）**：本仓定位独立只读分析服务/参考实现，core `metrics`/`reporting` 不迁移（保留冻结），`SVC-AN-G3` 关闭、K7 挂起
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -37,7 +37,9 @@ verified-by: QT-43 收口 ✅（2026-11-10：⑤ 三条判据逐条点名用例 
 > - **容器实测（daemon 本轮可达，订正上一条「不可达」陈述）**：`docker build -t tellurion-analytics:g0-verify .` 成功；以临时容器起（`ANALYTICS_*` 指向临时 PG）后 `curl -sS http://127.0.0.1:8087/healthz` → `200 ok`，`docker inspect -f '{{.State.Health.Status}}'` → `healthy`。
 > - **如实登记**：未引 `contracts`（`go.mod` 仍只 pgx + kit）；未改分析口径与 core `/report`；token 签发/分发仍在 core / kit（G3 前置，跨仓腿）；未做 core → 本仓的真实调用链（G3 未开工）。
 
-### SVC-AN-G3 · core/UI 消费与 core 指标实现退役（ADR-036）[P1] ⛔（2026-10-26 复核：无消费方）
+### SVC-AN-G3 · core/UI 消费与 core 指标实现退役（ADR-036）[P1] ✅（2026-11-10 撤销/关闭：主任裁决 A，见 ADR-0005）
+
+> **2026-11-10 主任裁决 A（关闭本单）**：本仓定位为「独立只读分析服务 / 参考实现」，core 不迁移 `pkg/backtest/metrics` / `reporting`（`SVC-CORE-AN-RETIRE` 结论 = 保留并冻结）；本单从 open 项撤销，不再以「有消费者」为验收目标。K7（`RegisterBenchmark` 零生产调用）**挂起**并保留登记，不伪造消费者。成文见 [`docs/adr/0005-独立只读参考实现-core不迁移.md`](adr/0005-独立只读参考实现-core不迁移.md)。
 
 - **① 目标**：至少一个真实消费者通过 HTTP 调用本仓；core 的重复指标/报告实现退役。
 - **② 上下文**：本仓 8 端点已实装，但 core 零调用方；core `cmd/analysis` 仍直接算 metrics/reporting；本轮 S1 不依赖本仓，所以 G3 允许后置。

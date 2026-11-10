@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-10-26
-verified-by: H6（R2 owner 落本仓（§9.7 R2 + §5 依赖方向）；`service` 服务间角色入策略表，ADR-0004）
+last-verified: 2026-11-10
+verified-by: 主任裁决 A（ADR-0005）：定位独立只读分析服务/参考实现，core 指标实现不迁移；此前 H6（R2 owner 落本仓（§9.7 R2 + §5 依赖方向）；`service` 服务间角色入策略表，ADR-0004）
 ---
 
 # 架构 — tellurion-analytics
@@ -11,6 +11,8 @@ verified-by: H6（R2 owner 落本仓（§9.7 R2 + §5 依赖方向）；`service
 分析服务：基准 / 归因 / 敏感性 / 蒙特卡洛。**纯函数、只读上游**（不写别人的表，只写自己的 `analysis.*`）。
 
 它出仓的理由不是"计算重"（core 也能算），而是这些分析**互相独立、可并行、结果可缓存**，且天然是"给报告用的"，不进入决策热路径。
+
+**定位裁决（2026-11-10，[ADR-0005](adr/0005-独立只读参考实现-core不迁移.md)）**：本仓是**独立只读分析服务 / 参考实现**，不承担 core 迁移目标。core `pkg/backtest/metrics` / `reporting` 保留并冻结（`SVC-CORE-AN-RETIRE`），`SVC-AN-G3` 关闭，K7（`analysis.benchmarks` 生产写者为 0）挂起。若未来产品需要统一分析 API，须新立 ADR + 任务单，不得直接解冻已删/冻结路径。
 
 ## 2. 分层
 

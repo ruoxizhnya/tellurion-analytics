@@ -18,7 +18,7 @@ verified-by: SVC-AN-G4（`docs/runbook.md` §6 把 §1.1 的报告体生命周�
 | 表 | 主键 | 关键列与约束 | 现状 |
 |---|---|---|---|
 | `analysis.reports` | `report_id` | `run_id`、`analysis_type`（CHECK 六值）、`status`（CHECK pending/running/completed/failed）、`metrics_version`、`params_hash CHAR(64)`、`input_hash CHAR(64)`、`seed BIGINT`（可空）、`body JSONB`、`error TEXT DEFAULT ''`、`created_at` / `updated_at`；UNIQUE `NULLS NOT DISTINCT (run_id, analysis_type, params_hash, input_hash, seed, metrics_version)`；**CHECK `(status='completed') = (body IS NOT NULL)`**、**CHECK `status<>'failed' OR error<>''`**；`BEFORE UPDATE` 触发器 `reports_completed_immutable` 拒绝改 completed 行（SQLSTATE 55000） | PG 已接线 |
-| `analysis.benchmarks` | `(code, adjustment_basis, dataset_hash)` | `source TEXT DEFAULT ''`、`registered_at`；**只存引用，不存行情本体**（行情归 data）；新 `dataset_hash` = 新一行，不覆盖 | PG 已接线，但**写方法生产调用为零**（SVC-AN-G2 处置见 §1.1） |
+| `analysis.benchmarks` | `(code, adjustment_basis, dataset_hash)` | `source TEXT DEFAULT ''`、`registered_at`；**只存引用，不存行情本体**（行情归 data）；新 `dataset_hash` = 新一行，不覆盖 | PG 已接线，但**写方法生产调用为零**（SVC-AN-G2 处置见 §1.1；K7 于 2026-11-10 随 ADR-0005 挂起） |
 | `analysis.sensitivity_runs` | `report_id` → `analysis.reports` | `run_id`、`grid JSONB NOT NULL`、`points JSONB`（逐点结果，可空直到有结果）、`parent_job_id TEXT NOT NULL DEFAULT ''`（X5b 父作业，2026-10-25 加，`ALTER … ADD COLUMN IF NOT EXISTS`） | PG 已接线（提交落行 + 逐点回填已实现） |
 | `analysis.mc_runs` | `report_id` → `analysis.reports` | **`seed BIGINT NOT NULL`**、`n INTEGER CHECK (n>0)`、`method`（CHECK bootstrap/shuffle）、`input_hash CHAR(64)`、`summary JSONB NOT NULL` | PG 已接线（写入已实现） |
 | `analysis.attribution` | `report_id` → `analysis.reports` | `method`（CHECK brinson/factor）、`contributions JSONB NOT NULL`、**`residual DOUBLE PRECISION NOT NULL`**、`input_hash CHAR(64)` | PG 已接线（写入已实现） |
@@ -36,7 +36,7 @@ verified-by: SVC-AN-G4（`docs/runbook.md` §6 把 §1.1 的报告体生命周�
 | 表 | 谁写 | 谁读 | 生命周期 | 保留期 |
 |---|---|---|---|---|
 | `analysis.reports` | `PG.PutReport`（唯一写路径；`Memory` 仅测试） | 本仓 HTTP 面 `GET /api/analysis/reports/{id}` 与 `/export`；`Service.replay` 做同键幂等复用 | `pending → running → completed / failed`；`completed` 起不可变（同键同内容 no-op、异内容 `ErrReportConflict`） | **90 天**（按 `created_at`） |
-| `analysis.benchmarks` | `PG.RegisterBenchmark`（**生产调用为零**，处置见下） | `Service.Benchmark` 经 `PG.LatestBenchmark` 取登记；行情本体走上游 `BenchmarkReader` | 只增不改：新 `dataset_hash` = 新一行；未登记 ⇒ `ErrBenchmarkNotRegistered`，基准比较 fail-closed | **90 天**（按 `registered_at`；表当前无数据） |
+| `analysis.benchmarks` | `PG.RegisterBenchmark`（**生产调用为零**，K7 于 2026-11-10 随 ADR-0005 挂起，处置见下） | `Service.Benchmark` 经 `PG.LatestBenchmark` 取登记；行情本体走上游 `BenchmarkReader` | 只增不改：新 `dataset_hash` = 新一行；未登记 ⇒ `ErrBenchmarkNotRegistered`，基准比较 fail-closed | **90 天**（按 `registered_at`；表当前无数据） |
 | `analysis.sensitivity_runs` | `PG.PutSensitivity`（提交时落 `grid`，父作业落定后一次写满 `points`） | `Service` 的敏感性回填 / 汇总（`GetSensitivity`）；对外报告体在 `reports.body` | 随父报告；`points` 只能从 NULL 写满一次，之后不可变 | **90 天**（跟随 `reports.created_at`） |
 | `analysis.mc_runs` | `PG.PutMonteCarlo`（`seed` 必填） | 本仓当前无独立读取路径；结果经 `reports.body` 返回 | 随报告一次性落行，同键异内容 `ErrReportConflict` | **90 天**（跟随 `reports`） |
 | `analysis.attribution` | `PG.PutAttribution`（`residual` 必落库） | 本仓当前无独立读取路径；结果经 `reports.body` 返回 | 随报告一次性落行，同键异内容 `ErrReportConflict` | **90 天**（跟随 `reports`） |
