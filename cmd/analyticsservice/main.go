@@ -4,7 +4,7 @@
 // 时）→ HTTP 面。未配置的端口保持 nil，对应端点 fail-closed 成
 // 503 dependency_unavailable —— 不伪造结果、不返回空报告。
 //
-// 未接线项（docs/TASKS.md QT-43 施工记录）：PDF 导出（R5 未裁）。
+// 未接线项：PDF 导出（R5 已裁为非目标，不实现）。
 // 鉴权与上游服务间凭证已接线（裁-15）：本服务过 kit/httpadapter 启动闸，
 // 调 core / data 时按 -core-token / -data-token 带 Bearer。
 package main
@@ -89,7 +89,7 @@ func main() {
 
 	artToken := *artifactToken
 	if artToken == "" {
-		// artifact 面当前挂在 core（R2 owner 未裁）；未单独配就复用 core 凭证。
+		// artifact 面当前挂在 core（R2 的 DTO owner 已裁 = 本仓，wire 面仍 interim）；未单独配就复用 core 凭证。
 		artToken = *coreToken
 	}
 	if *coreURL != "" {

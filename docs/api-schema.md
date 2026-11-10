@@ -1,23 +1,23 @@
 ---
 status: active
-last-verified: 2026-11-10
-verified-by: 2026-11-10 R1 偏差①收口（core K4 三态码 + 本仓按契约 code 映射，§6.1；§2.2 表补 409 两码来源）；2026-11-07 SVC-AN-G4 补五类上游失败（401 / 404 / 409 / 503 / 超时）的本仓返回码与重试口径（§2.2，超时 = 出站 10s context 上界）；2026-11-07 SVC-AN-G1 补 `GET /readyz`（就绪探针：PG + 迁移 + 上游装配，无鉴权不限流）、按身份限流（429 `rate_limited`）、上游 4xx/5xx 映射表（§2.1）、幂等语义写死（§3）与「无列表面」声明（§1）；2026-10-26 H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` 服务间角色入策略表，ADR-0004）与 SVC-AN-G0（`GET /healthz`）
+last-verified: 2026-11-11
+verified-by: 2026-11-11 代码-文档对齐审计（kit pin v0.1.4→v0.2.0、R2 owner/形状口径、QT-43 引用改指归档）；2026-11-10 R1 偏差①收口（core K4 三态码 + 本仓按契约 code 映射，§6.1；§2.2 表补 409 两码来源）；2026-11-07 SVC-AN-G4 补五类上游失败（401 / 404 / 409 / 503 / 超时）的本仓返回码与重试口径（§2.2，超时 = 出站 10s context 上界）；2026-11-07 SVC-AN-G1 补 `GET /readyz`（就绪探针：PG + 迁移 + 上游装配，无鉴权不限流）、按身份限流（429 `rate_limited`）、上游 4xx/5xx 映射表（§2.1）、幂等语义写死（§3）与「无列表面」声明（§1）；2026-10-26 H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` 服务间角色入策略表，ADR-0004）与 SVC-AN-G0（`GET /healthz`）
 ---
 
 # API Schema — tellurion-analytics
 
 > **实现状态（2026-10-25）**：8 个端点全部在 `internal/httpapi` 落盘；计算面在 `internal/analysis`（纯函数）；**PG Store、启动迁移与四个上游适配器已接线**（`cmd/analyticsservice` 的 `-dsn` / `-core-url` / `-data-url` / `-artifact-url` / `-orchestration-url`，各自也可用同名 `ANALYTICS_*` 环境变量）。
-> **未配置的端口**仍 fail-closed 成 `503 dependency_unavailable`，**不伪造结果、不返回空报告**。sensitivity 的父作业队列（X5b / W6）已接：提交建 pending 报告，`GET /reports/{id}` 轮询父汇总并逐点回填。可用性取决于部署配置（`docs/TASKS.md` QT-43 施工 ② / W8 记录）。
+> **未配置的端口**仍 fail-closed 成 `503 dependency_unavailable`，**不伪造结果、不返回空报告**。sensitivity 的父作业队列（X5b / W6）已接：提交建 pending 报告，`GET /reports/{id}` 轮询父汇总并逐点回填。可用性取决于部署配置（历史施工记录见 `docs/archive/tasks-archive-2026-11.md` 的 QT-43 / W8）。
 
 > **契约地位**：HTTP，**全部只读语义**（POST 表示"提交计算"，不改上游）。重计算走异步 job。
 > 本文件是**本仓对外接口的唯一真相源**。代码与它不一致时，先判断谁错：契约错 → 改本文 + 立 ADR；实现错 → 改代码。
 > 跨仓消费方（core / agent / ui / 其他服务）按本文件编码，**不读本仓实现**。
 > **请求 / 响应形状**：本文只冻结**路径、错误码、幂等与兼容**；逐端点的目标签名、DTO 字段与版本策略见 `ARCHITECTURE.md` §9（M8 接口对表），两处必须同步改，不复制形状。
-> **鉴权（2026-10-25 已接线，ADR-0003；2026-10-26 加 `service` 档，ADR-0004）**：机制在 kit `v0.1.4` 的 `auth/httpadapter`（Bearer → `Parse` →
-> `kind=access` → 角色 any-of；`v0.1.4` 起 `role=service` 不再要求 subject 是 `int64`，否则裁-17 的 `sub=service:<repo>` 在本仓恒 401），策略表在本仓 `internal/httpapi/policy.go`；**8 个分析端点全部**过闸且 fail-closed：
+> **鉴权（2026-10-25 已接线，ADR-0003；2026-10-26 加 `service` 档，ADR-0004）**：机制在 kit `auth/httpadapter`（Bearer → `Parse` →
+> `kind=access` → 角色 any-of；`v0.1.4` 起 `role=service` 不再要求 subject 是 `int64`，否则裁-17 的 `sub=service:<repo>` 在本仓恒 401；本仓 pin `v0.2.0`），策略表在本仓 `internal/httpapi/policy.go`；**8 个分析端点全部**过闸且 fail-closed：
 > 未装配 Authorizer → 503，无凭证 / 坏 token → 401，越权 → 403。6 个 POST = trader（+ admin + **service**），2 个 GET = viewer（+ trader + admin + **service**）。
 > 无 secret + 回环 = 开放；无 secret + 非回环 = **拒绝启动**。现状登记见 §7。
-> **前置现状**：sensitivity 的父作业队列走 G7/X5b（`tellurion-orchestration` QT-44，**W6 已落**）；结果读取走 core 的 **R1 持久读面**（B6-3 `8537ffd`，2026-10-25：`backtest_jobs.result_status` 是 `status` 的唯一权威，「跑完但无效」返 200 不再 404；队列态非 completed 的行仍 404，偏差见 §6.1）；基准走 X1b（已落）；holdings / 因子暴露走 interim artifact 面（R2 形状未冻结）。缺依赖即报错，不降级出假报告。
+> **前置现状**：sensitivity 的父作业队列走 G7/X5b（`tellurion-orchestration` QT-44，**W6 已落**）；结果读取走 core 的 **R1 持久读面**（B6-3 `8537ffd`，2026-10-25：`backtest_jobs.result_status` 是 `status` 的唯一权威；`completed` 且 `invalid` 仍返 200（本仓映射 409 `run_result_invalid`），2026-11-10 K4 / 裁决 ⑲ 起 pending/running → 409 `run_result_incomplete`、failed → 409 `run_result_failed`，偏差见 §6.1）；基准走 X1b（已落）；holdings / 因子暴露走 interim artifact 面（R2 的 **DTO owner 已裁 = 本仓**，消费端形状冻结在 §6.2；wire 面仍 interim）。缺依赖即报错，不降级出假报告。
 
 ## 1. 接口面
 
@@ -281,7 +281,7 @@ verified-by: 2026-11-10 R1 偏差①收口（core K4 三态码 + 本仓按契约
 - **`service` 服务间角色（2026-10-26，裁-17 / ADR-0004）**：core 代机器调本仓时用 `service` 角色的长期 token。本仓 8 条端点**全部**开这一档——本仓没有审批 / 留痕 / 配置 / 交易端点，不存在「机器凭证代劳人的责任动作」这条风险面（详见 ADR-0004 的理由与代价）。
   - **签发与分发不在本仓**：本仓只保证「**有 token 就能用**」——不造 token、不存 token、不分发 token。签发入口是 kit `v0.1.2` 的 `IssueServiceToken`；签发与注入属 core QT-71 与 `deploy/k8s/` 部署清单（**跨仓腿**）。
   - **守卫**：`TestPolicy_ServiceRoleScope`（service 调 8 条端点都不被闸拦下 + viewer 打 POST 仍 403）、`TestPolicy_ServiceRoleCoexistsWithHumanRoles`（service 与真人角色并列写在同一条 `Roles`）、`TestPolicy_ServiceRoleDeclaredOnEveryRoute`（全表都开，新增端点漏表态即红）。
-  - ~~**已知跨仓缺口**：kit `Authenticate` 要求 subject 可解析为 `int64`，裁-17 的 `sub=service:<repo>` 会被判 401。~~ **已于 kit `v0.1.4`（KT-11）修复**：`role=service` 的非数字 subject 不再 401（本仓 `go.mod` 已 pin `v0.1.4`，见 `AGENTS.md` §4）。本仓策略表守卫仍只证「本仓判定正确」，生产 token 能否签发 / 分发归 `tellurion:QT-77`。
+  - ~~**已知跨仓缺口**：kit `Authenticate` 要求 subject 可解析为 `int64`，裁-17 的 `sub=service:<repo>` 会被判 401。~~ **已于 kit `v0.1.4`（KT-11）修复**：`role=service` 的非数字 subject 不再 401（本仓 `go.mod` 已 pin `v0.2.0`，见 `AGENTS.md` §4）。本仓策略表守卫仍只证「本仓判定正确」，生产 token 能否签发 / 分发归 `tellurion:QT-77`。
 - **限流（2026-11-07，SVC-AN-G1）**：鉴权通过后按身份（用户名，其次 subject；开放访问归同一桶）做令牌桶，默认 **50 rps / burst 200**（`internal/httpapi/limit.go`）；超限 `429 rate_limited` + `Retry-After: 1`。顺序固定「鉴权 → 限流」，因此 `401` / `403` 与 `429` 可区分。锚点 = `TestRateLimitIs429AndDistinctFromAuth`、`TestReadyzIsExemptFromAuthAndRateLimit`；探针 `/healthz`（cmd）与 `/readyz`（httpapi 直接注册）都豁免鉴权与限流。
 - **启动闸**：有 `JWT_SECRET` 启用鉴权；无 secret + 回环 = 开放；无 secret + 非回环 = **拒绝启动**。
-- **接线清单（已完成）**：① `AuthStatus` 常量与用例；② 本节与 §2 两行；③ `ARCHITECTURE.md` §9.7 R6；④ `docs/TASKS.md` QT-43 的「鉴权」条目；⑤ `service` 档（策略表 + 三条守卫用例 + ADR-0004 + 本节登记）。
+- **接线清单（已完成）**：① `AuthStatus` 常量与用例；② 本节与 §2 两行；③ `ARCHITECTURE.md` §9.7 R6；④ 台账「鉴权」条目（已归档到 `docs/archive/tasks-archive-2026-11.md`）；⑤ `service` 档（策略表 + 三条守卫用例 + ADR-0004 + 本节登记）。

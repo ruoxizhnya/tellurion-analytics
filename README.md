@@ -1,6 +1,6 @@
 # tellurion-analytics
 
-> module: `tellurion-analytics` ｜ 状态：**已启动（X4 代码落盘 + PG / 上游读取端口接线）**
+> module: `tellurion-analytics` ｜ 状态：**X4 已收口（2026-11-10，QT-43）** —— 8 条端点 + PG Store + 四个上游适配器已接线；剩余仅 K7 挂起项
 
 分析服务：基准 / 归因 / 敏感性 / 蒙特卡洛。**纯函数、只读上游**——不持有跨请求状态、不写别人的表；只写自己的结果表 `analysis.*`。
 
@@ -37,7 +37,7 @@ docker compose -f deploy/compose.yaml up --build
 本仓**单独 checkout 就能跑通**上面三条。需要别的仓源码才过 → 边界错了，不是加 `replace` 能解决的问题。
 
 > 不给 `-dsn` 时进程用 Memory Store（仅本地 / 测试）；未配置的上游端口保持 nil，对应端点返回 `503 dependency_unavailable`——这是**有意 fail-closed**（不伪造结果）。
-> 鉴权：有 `JWT_SECRET` 时启用（6 个 POST = trader + admin + **service**，2 个 GET = viewer + trader + admin + **service**）；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。`service` 是服务间角色（core 代机器调本服务用，ADR-0004）：签发与分发**不在本仓**，本仓只保证「有 token 就能用」。现状与未落项见 `docs/ARCHITECTURE.md` §9.8、`docs/TASKS.md` QT-43 施工记录。
+> 鉴权：有 `JWT_SECRET` 时启用（6 个 POST = trader + admin + **service**，2 个 GET = viewer + trader + admin + **service**）；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。`service` 是服务间角色（core 代机器调本服务用，ADR-0004）：签发与分发**不在本仓**，本仓只保证「有 token 就能用」。现状与未落项见 `docs/ARCHITECTURE.md` §9.8、`docs/TASKS.md`（仅 K7 挂起）与 `docs/archive/tasks-archive-2026-11.md`（QT-43 施工记录）。
 
 ## 边界
 

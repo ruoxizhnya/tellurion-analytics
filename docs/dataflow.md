@@ -44,7 +44,7 @@ verified-by: 2026-11-10 R1 偏差①收口（读取边 `ResultReader` 按 core K
 
 | 端口 | 上游 | 失败语义 |
 |---|---|---|
-| `ResultReader` | core `GET /api/backtest/{id}/report`（**R1 持久读面**，core B6-3 `8537ffd`：`backtest_jobs.result_status` 是 `status` 的唯一权威，`completed/invalid` 行返 200 可读；2026-11-10 K4 / 裁决 ⑲ 起按三态码回） | 404 `run_not_found` → `run_not_found`；409 `run_result_incomplete`（pending / running）→ `409 run_result_incomplete`；409 `run_result_failed` → `409 run_result_failed`；缺 `status` → `run_result_incomplete`（**不解析错误串**）；网络 / 5xx → `dependency_unavailable` |
+| `ResultReader` | core `GET /api/backtest/{id}/report`（**R1 持久读面**，core B6-3 `8537ffd`：`backtest_jobs.result_status` 是 `status` 的唯一权威；`completed` 行返 200，其中 `invalid` 也返 200（本仓据此映射 409 `run_result_invalid`，不解析错误串）；2026-11-10 K4 / 裁决 ⑲ 起 pending/running → 409 `run_result_incomplete`、failed → 409 `run_result_failed`） | 404 `run_not_found` → `run_not_found`；409 `run_result_incomplete`（pending / running）→ `409 run_result_incomplete`；409 `run_result_failed` → `409 run_result_failed`；200 + `status=invalid` → `409 run_result_invalid`；缺 `status` → `run_result_incomplete`（**不解析错误串**）；网络 / 5xx → `dependency_unavailable` |
 | `BenchmarkReader` | tellurion-data X1b：`GET /datasets/resolve` → `GET /datasets/{hash}` | 任何取不到 / basis 不一致 → `benchmark_data_unavailable` |
 | `HoldingsProvider` / `FactorExposureProvider` | interim artifact 面：`GET /runs/{id}/portfolio-snapshot`、`/runs/{id}/factor-exposures` | 404 / 空体 → `run_result_incomplete`（点名缺哪个）；网络 / 5xx → `dependency_unavailable` |
 | `SensitivityQueue` | X5b：`POST /api/runs/parents`（batch）+ `GET /api/runs/parents/{id}`（counts + `summary.Tasks`，无 summary 回落 `children`） | 404 → 父作业不存在（报告 failed，终态）；网络 / 非 2xx → `dependency_unavailable`（报告保持 pending，下次读取重试） |

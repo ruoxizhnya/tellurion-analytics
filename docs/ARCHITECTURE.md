@@ -52,7 +52,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
         └──(只读)──► tellurion-data（基准、因子值）
 ```
 
-**今日实况（2026-10-26）**：`go.mod` 的直接依赖两条——`github.com/jackc/pgx/v5 v5.11.0`（PG Store 与迁移执行）与 `github.com/ruoxizhnya/tellurion-kit v0.1.4`（鉴权机制，2026-10-25 W3 接入时是 `v0.1.1`，同日随 kit `KT-11` 升——`v0.1.1` 会把裁-17 的 `sub=service:<repo>` 非数字 subject 判 401，服务间调用读不到本仓策略表）；**内部仓只有 kit 这一条**。**本仓不依赖 `tellurion-contracts`**：R1 / R2 的 DTO owner 已裁 = **本仓**（裁决 ③，2026-10-25 主任口径），本地形状冻结在 `internal/analysis/model.go`（§9.8），触发迁移的条件写死为「core 或 orchestration 出现 import analytics DTO 的 Go 代码」（HTTP 交互不算）——成文见 `api-schema.md` §6.4。
+**今日实况（2026-11-11 校准）**：`go.mod` 的直接依赖两条——`github.com/jackc/pgx/v5 v5.11.0`（PG Store 与迁移执行）与 `github.com/ruoxizhnya/tellurion-kit v0.2.0`（鉴权机制；2026-10-25 W3 接入时是 `v0.1.1`，同日随 kit `KT-11` 升到 `v0.1.4`，2026-11-10 随 `KT-13` 升到 `v0.2.0`——`v0.1.1` 会把裁-17 的 `sub=service:<repo>` 非数字 subject 判 401，服务间调用读不到本仓策略表）；**内部仓只有 kit 这一条**。**本仓不依赖 `tellurion-contracts`**：R1 / R2 的 DTO owner 已裁 = **本仓**（裁决 ③，2026-10-25 主任口径），本地形状冻结在 `internal/analysis/model.go`（§9.8），触发迁移的条件写死为「core 或 orchestration 出现 import analytics DTO 的 Go 代码」（HTTP 交互不算）——成文见 `api-schema.md` §6.4。
 
 ⇒ 依赖方向图里**没有 contracts 那一层**：DTO 只在本仓出现，不向其他仓输出；将来真迁（触发条件命中）时按 contracts ADR-0001 ① 迁，端口方法集与校验语义不变。守卫 `TestUpstreamContractOwnerStaysLocal` 钉住「本仓源码零 contracts import」。
 
@@ -73,13 +73,14 @@ tellurion-analytics ──(只读)──► core / run（结果）
 ## 8. 分期与状态
 
 > 更新（2026-10-25，W8）：PG Store、启动迁移与**四个**上游适配器（结果 / X1b 基准 / artifact / X5b 父作业）已接线；未配置上游 URL 的端口仍 fail-closed（503）。sensitivity 的**逐点回填**已落（提交父作业 → 读路径轮询 → points）。详见 §9.8。
+> 收口（2026-11-10，QT-43）与校准（2026-11-11 审计）：X4a–X4d 代码与测试均已落盘，`docs/TASKS.md` 只剩 K7 挂起项；下表状态随之改为 ✅。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| X4a | metrics + benchmark（同步） | 🔶 代码 + PG Store 已落；`ResultReader` 已接 **core R1 持久读面**（`-core-url`，§9.7 R1）、`BenchmarkReader` 已接 X1b（`-data-url`），未配置仍 503 |
-| X4b | attribution（Brinson / 因子） | 🔶 代码已落；`HoldingsProvider` / `FactorExposureProvider` 已接 interim artifact 面（`-artifact-url`），R2 形状未冻结 |
-| X4c | sensitivity + montecarlo（异步 + seed） | 🔶 montecarlo 端到端可用（PG 持久化）；sensitivity 已接 X5b（提交 + 逐点回填，W8）。**执行侧 worker 已在 core 落地**（`tellurion:cmd/worker`，QT-44 core 腿 2026-10-25）：本仓 E2E 经真实 worker 协议（注册 / 领取 / 上报）驱动父汇总，不再 SQL 模拟 |
-| X4d | 报告导出（html / csv；**pdf 已裁为非目标**，§9.7 R5） | 🔶 html / csv 可用且确定性；pdf 不做 |
+| X4a | metrics + benchmark（同步） | ✅（2026-11-10）代码 + PG Store 已落；`ResultReader` 接 **core R1 持久读面**（`-core-url`，§9.7 R1）、`BenchmarkReader` 接 X1b（`-data-url`），未配置仍 503 |
+| X4b | attribution（Brinson / 因子） | ✅（2026-11-10）`HoldingsProvider` / `FactorExposureProvider` 接 interim artifact 面（`-artifact-url`）；R2 的 **DTO owner 已裁 = 本仓**（2026-10-26 裁决 ③），消费端形状冻结在 `api-schema.md` §6.2，wire 面仍 interim |
+| X4c | sensitivity + montecarlo（异步 + seed） | ✅（2026-11-10）montecarlo 端到端可用（PG 持久化）；sensitivity 接 X5b（提交 + 逐点回填，W8）。**执行侧 worker 在 core**（`tellurion:cmd/worker`，QT-44 core 腿 2026-10-25，仍在）：本仓 E2E 经真实 worker 协议（注册 / 领取 / 上报）驱动父汇总，不再 SQL 模拟 |
+| X4d | 报告导出（html / csv；**pdf 已裁为非目标**，§9.7 R5） | ✅（2026-11-10）html / csv 可用且确定性；pdf 不做 |
 
 ## 9. 接口对表（M8 前置 · ✅ 2026-10-22）
 
@@ -130,7 +131,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 ### 9.4 C 组 · 服务对外 HTTP 面（升格后）
 
-> **鉴权（2026-10-25 已接线，ADR-0003；2026-10-26 加 `service` 档，ADR-0004）**：机制在 kit `v0.1.4` 的 `auth/httpadapter`（`Parse` + `kind==access` + 角色 any-of + 启动闸；`v0.1.4` 起 `role=service` 豁免 subject 的 `int64` 要求），策略表在本仓 `internal/httpapi/policy.go`。**全部端点** fail-closed：未装配 Authorizer → `503 auth_unavailable`，无 token / 过期 / refresh 当 access → `401 unauthenticated`，角色不足 → `403 forbidden`。6 个 POST = trader（+ admin + **service**），2 个 GET = viewer（+ trader + admin + **service**）；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。
+> **鉴权（2026-10-25 已接线，ADR-0003；2026-10-26 加 `service` 档，ADR-0004）**：机制在 kit `auth/httpadapter`（`Parse` + `kind==access` + 角色 any-of + 启动闸；`v0.1.4` 起 `role=service` 豁免 subject 的 `int64` 要求；本仓 pin `v0.2.0`），策略表在本仓 `internal/httpapi/policy.go`。**全部端点** fail-closed：未装配 Authorizer → `503 auth_unavailable`，无 token / 过期 / refresh 当 access → `401 unauthenticated`，角色不足 → `403 forbidden`。6 个 POST = trader（+ admin + **service**），2 个 GET = viewer（+ trader + admin + **service**）；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。
 > `service` 是**服务间**角色（core 代机器调本仓用）：本仓 8 条端点全是分析计算 / 报告读取，**没有**审批 / 留痕 / 配置 / 交易端点，故全表开放（ADR-0004）。签发与分发**不在本仓**——本仓只保证「有 token 就能用」。
 > **wire 契约落点**：core `docs/openapi.yaml`（QT-50 ③-③）。今天它没有下表端点；下表在升格前是目标草案，**不复制进 openapi**。
 > **错误码**：与 `docs/api-schema.md` §2 双向一一对应。
@@ -215,9 +216,9 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 **故意取舍（不是遗漏）**
 
-1. **内部仓依赖只有 kit 一条**：`go.mod` 的直接依赖是 `pgx v5.11.0`（第三方驱动）+ `tellurion-kit v0.1.4`（鉴权机制，W3 接入、同日随 kit `KT-11` 升 pin）；**contracts 零依赖**——R1 / R2 的 DTO owner 已裁 = **本仓**（裁决 ③，2026-10-25），本地镜像**不是「等契约发布就迁走」的临时态**：触发迁移的条件写死为「core 或 orchestration 出现 import analytics DTO 的 Go 代码」（HTTP 交互不算），成文在 `api-schema.md` §6.4，守卫 `TestUpstreamContractOwnerStaysLocal`（本仓源码零 contracts import）钉住。
+1. **内部仓依赖只有 kit 一条**：`go.mod` 的直接依赖是 `pgx v5.11.0`（第三方驱动）+ `tellurion-kit v0.2.0`（鉴权机制，W3 接入 `v0.1.1` → `v0.1.4`，2026-11-10 随 `KT-13` 升 `v0.2.0`）；**contracts 零依赖**——R1 / R2 的 DTO owner 已裁 = **本仓**（裁决 ③，2026-10-25），本地镜像**不是「等契约发布就迁走」的临时态**：触发迁移的条件写死为「core 或 orchestration 出现 import analytics DTO 的 Go 代码」（HTTP 交互不算），成文在 `api-schema.md` §6.4，守卫 `TestUpstreamContractOwnerStaysLocal`（本仓源码零 contracts import）钉住。
 2. **PG 是生产 Store，Memory 只做测试 / 无库本地装配**：启动时给了 DSN 就连接 + 迁移；空 DSN 会打 WARNING。`completed` 不可变由应用层 + DB 触发器双保险（ADR-0002）。
-3. **R1 已落 ⇒ `ResultReader` 读的是持久读面**（2026-10-25，core B6-3 `8537ffd`）：`status` 的唯一权威是 `backtest_jobs.result_status`，缺 `status` 只剩「上游没升到 R1」一种含义，照旧 fail-closed、**不解析错误串**；URL / DTO / 端口方法集都没动（§9.7 R1 原先的预期成立）。残留两条偏差如实登记：读面按**队列态**放行（pending / running / 引擎故障行 ⇒ 404），Migration 059 把迁移前的完成行回填成 `completed`。
+3. **R1 已落 ⇒ `ResultReader` 读的是持久读面**（2026-10-25，core B6-3 `8537ffd`）：`status` 的唯一权威是 `backtest_jobs.result_status`，缺 `status` 只剩「上游没升到 R1」一种含义，照旧 fail-closed、**不解析错误串**；URL / DTO / 端口方法集都没动（§9.7 R1 原先的预期成立）。~~残留两条偏差~~ **偏差① 已于 2026-11-10 结清**（core K4 / 裁决 ⑲：pending/running → 409 `run_result_incomplete`、failed → 409 `run_result_failed`、`result_status=invalid` 仍返 200 并由本仓映射 409 `run_result_invalid`；本仓按 code 与 `status` 双轨映射）；**偏差②（Migration 059 存量回填）登记为不可恢复的历史数据**，不再等代码修。
 4. **R2 的 DTO owner 已裁 = 本仓（2026-10-25，裁决 ③）**：`GET /runs/{id}/portfolio-snapshot` / `/factor-exposures` 是 **interim wire 形状**（上游 artifact 面尚未由 core 定稿），但**消费端 DTO 的 owner 不再是「待定」**——留在本仓，触发迁移的条件见 `api-schema.md` §6.4。端口方法集与校验语义在真迁移时不变。
 5. **sensitivity 的 points 由父汇总驱动（2026-10-25）**：`base_run_spec` 只带 `run_id` 锚点，网格交给 X5b；`points` 只能从 NULL 一次写满，缺 point 就整份失败（不补、不猜）。执行侧 worker 在 core（`cmd/worker`）：它按锚点恢复完整 RunSpec、用 core 引擎执行、把 K9 结论上报编排侧；本仓仍不执行回测。
 6. **鉴权已接线（2026-10-25）**：kit `auth/httpadapter` + 本仓策略表，全端点 401/403/503 fail-closed（ADR-0003）；**2026-10-26 加 `service` 服务间角色**（ADR-0004，本仓 8 条端点全开；签发与分发不在本仓）。

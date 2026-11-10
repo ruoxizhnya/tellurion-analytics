@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-07
-verified-by: SVC-AN-G4（`docs/runbook.md` §6 把 §1.1 的报告体生命周期与 90 天保留期落成运维口径，数值不变）；SVC-AN-G2（写者 / 读者 / 生命周期成文 + benchmarks 处置 + 保留期 90 天；迁移重放与跨 schema 写护栏见 `internal/analysis/g2_replay_test.go` / `g2_schema_write_guard_test.go`）
+last-verified: 2026-11-11
+verified-by: 2026-11-11 代码-文档对齐审计（§4 core 迁移口径纠偏：本仓 DDL 唯一真相是 `internal/analysis/ddl.go`）；SVC-AN-G4（`docs/runbook.md` §6 把 §1.1 的报告体生命周期与 90 天保留期落成运维口径，数值不变）；SVC-AN-G2（写者 / 读者 / 生命周期成文 + benchmarks 处置 + 保留期 90 天；迁移重放与跨 schema 写护栏见 `internal/analysis/g2_replay_test.go` / `g2_schema_write_guard_test.go`）
 ---
 
 # DB Schema — tellurion-analytics
@@ -68,7 +68,7 @@ verified-by: SVC-AN-G4（`docs/runbook.md` §6 把 §1.1 的报告体生命周�
 
 ## 4. 建表与迁移
 
-**现状（必须先知道）**：core 的迁移是「**启动时按序执行一组幂等 DDL**」——唯一真相是 `pkg/storage/postgres.go` 的 `migrationStatements()` 数组（`migrate()` 在服务启动时逐条跑）；**没有版本表、没有 down、没有执行记录**（有意取舍，理由见 core 的 `migrations/README.md`）。`migrations/`（14 个）与 `docs/migrations/`（25 个）里的 `.sql` 是**历史镜像，不执行**——改它们不会改库。
+**现状（必须先知道）**：本仓 `analysis.*` 的 DDL 唯一真相是 `internal/analysis/ddl.go` 的 `migrationStatements`（下一节「本仓约定」）。core 的启动迁移口径（`pkg/storage/postgres.go` 的 `migrationStatements()`、无版本表/无 down）只覆盖 **core 自有表**（`quant.*` / `run.*` / `public.stock_fundamentals` 等），与本仓无关；本仓没有、也不执行 `.sql` 历史镜像。
 
 **本仓约定**（从建仓第一天执行）：
 
