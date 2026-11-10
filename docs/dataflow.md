@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-07
-verified-by: SVC-AN-G4（读取边补出站 10s 上界 + 五类失败口径指针 §2.2）；R1 换面（读取边 `ResultReader` = core 持久读面；队列态 404 入失败模式表）
+last-verified: 2026-11-10
+verified-by: 2026-11-10 R1 偏差①收口（读取边 `ResultReader` 按 core K4 契约 code 映射三态；失败模式表「还在跑 / 引擎故障」行改 409）；SVC-AN-G4（读取边补出站 10s 上界 + 五类失败口径指针 §2.2）；R1 换面（读取边 `ResultReader` = core 持久读面）
 ---
 
 # Dataflow — tellurion-analytics

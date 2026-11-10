@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-07
-verified-by: 2026-11-07 SVC-AN-G4 补五类上游失败（401 / 404 / 409 / 503 / 超时）的本仓返回码与重试口径（§2.2，超时 = 出站 10s context 上界）；2026-11-07 SVC-AN-G1 补 `GET /readyz`（就绪探针：PG + 迁移 + 上游装配，无鉴权不限流）、按身份限流（429 `rate_limited`）、上游 4xx/5xx 映射表（§2.1）、幂等语义写死（§3）与「无列表面」声明（§1）；2026-10-26 H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` 服务间角色入策略表，ADR-0004）与 SVC-AN-G0（`GET /healthz`）
+last-verified: 2026-11-10
+verified-by: 2026-11-10 R1 偏差①收口（core K4 三态码 + 本仓按契约 code 映射，§6.1；§2.2 表补 409 两码来源）；2026-11-07 SVC-AN-G4 补五类上游失败（401 / 404 / 409 / 503 / 超时）的本仓返回码与重试口径（§2.2，超时 = 出站 10s context 上界）；2026-11-07 SVC-AN-G1 补 `GET /readyz`（就绪探针：PG + 迁移 + 上游装配，无鉴权不限流）、按身份限流（429 `rate_limited`）、上游 4xx/5xx 映射表（§2.1）、幂等语义写死（§3）与「无列表面」声明（§1）；2026-10-26 H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` 服务间角色入策略表，ADR-0004）与 SVC-AN-G0（`GET /healthz`）
 ---
 
 # API Schema — tellurion-analytics
@@ -83,6 +83,8 @@ verified-by: 2026-11-07 SVC-AN-G4 补五类上游失败（401 / 404 / 409 / 503 
 
 **原则**：宁可报错，也不产出一份"看起来正常"的错误报告。`invalid` / `failed` / `incomplete` 三者**分开报**——它们对调用方的处置完全不同（换 run / 修上游 / 等数据）。`503` 是**部署态**问题（代码在、依赖没接），与业务错误分开，调用方应重试或联系运维，**不应**把它当"该 run 没数据"。
 
+**来源（2026-11-10 起）**：表中 `run_result_incomplete` / `run_result_failed` 由 core 读面以**同名 code** 回 409（core K4 / 裁决 ⑲），本仓 `ResultReader` 按契约 code 映射（不解析文案）；未知 409 一律 fail-closed 成 `503 dependency_unavailable`。
+
 ### 2.1 上游 4xx/5xx ⇒ 本仓哪个码（闭集）
 
 > 「未配置上游 ⇒ 503」「缺 holdings / factor_exposures ⇒ 409 + `missing`」「缺 `seed` ⇒ 400」已在 §2 / §6.3，本节补齐**上游真返回 4xx/5xx 时**的折算。
@@ -90,8 +92,9 @@ verified-by: 2026-11-07 SVC-AN-G4 补五类上游失败（401 / 404 / 409 / 503 
 
 | 上游（端口） | 上游条件 | 本仓返回 |
 |---|---|---|
-| core R1 结果面（`ResultReader`） | `404` | `404 run_not_found` |
-| core R1 结果面 | 其他非 2xx / 连接失败 / 解码失败 | `503 dependency_unavailable` |
+| core R1 结果面（`ResultReader`） | `404`（`code=run_not_found`） | `404 run_not_found` |
+| core R1 结果面 | `409` + `code=run_result_incomplete` / `run_result_failed`（core K4 起） | 同名 409（`missing=status` / `error` 取自上游） |
+| core R1 结果面 | 其他非 2xx（含未知 409 code）/ 连接失败 / 解码失败 | `503 dependency_unavailable`（fail-closed，不猜语义） |
 | data X1b 基准（`BenchmarkReader`） | **任意**非 2xx / 连接失败 / 解码失败 | `409 benchmark_data_unavailable` |
 | artifact 面（`Holdings` / `Factors`） | `404` | `409 run_result_incomplete` + `missing=holdings` / `factor_exposures` |
 | artifact 面 | 其他非 2xx / 连接失败 / 解码失败 | `503 dependency_unavailable` |
