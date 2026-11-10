@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-10
-verified-by: R1 偏差①收口（2026-11-10：core K4 按裁决 ⑲ 落地 404 `run_not_found` / 409 `run_result_incomplete` / 409 `run_result_failed` 三态码，本仓 `ResultReader` 按契约 code 映射、未知 409 fail-closed；3 条新用例 + 一条破坏验证真做真还原）；`SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 analytics 零命中，且 `SVC-CORE-AN-RETIRE` 结论为「保留并冻结」+ K7 生产写者为 0 ⇒ 无消费者，维持 ⛔）；QT-43 真 core 进程 + 真 PG invalid 行端到端实跑（2026-11-10：core 持久读面 200 `status=invalid` → 本仓 409 `run_result_invalid` + reasons 原样透传，反向对照 404 / 503 各一条，库与进程已清）；QT-43 复核（未落项与 2026-10-26 一字不差）；SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）
+verified-by: QT-43 收口 ✅（2026-11-10：⑤ 三条判据逐条点名用例 + 真库/真 core 腿均已成立；剩余项逐条定性为 ⑥ 边界外或不可逆历史数据——token 跨仓分发、Migration 059 存量回填、R2 owner 已裁；SVC-AN-G3 维持 ⛔）；R1 偏差①收口（2026-11-10：core K4 按裁决 ⑲ 落地 404 `run_not_found` / 409 `run_result_incomplete` / 409 `run_result_failed` 三态码，本仓 `ResultReader` 按契约 code 映射、未知 409 fail-closed；3 条新用例 + 一条破坏验证真做真还原）；`SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 analytics 零命中，且 `SVC-CORE-AN-RETIRE` 结论为「保留并冻结」+ K7 生产写者为 0 ⇒ 无消费者，维持 ⛔）；QT-43 真 core 进程 + 真 PG invalid 行端到端实跑（2026-11-10：core 持久读面 200 `status=invalid` → 本仓 409 `run_result_invalid` + reasons 原样透传，反向对照 404 / 503 各一条，库与进程已清）；QT-43 复核（未落项与 2026-10-26 一字不差）；SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -56,7 +56,7 @@ verified-by: R1 偏差①收口（2026-11-10：core K4 按裁决 ⑲ 落地 404 
 
 > **⛔ 前置复核（2026-11-10，仍未开工）**：`tellurion` 非测试 Go 文件对 `analytics-service` / `ANALYTICS_URL` / `8087` **零命中** ⇒ core 仍无 HTTP 消费者；同轮 core `SVC-CORE-AN-RETIRE` 收口结论 = **保留并冻结**（`pkg/backtest/metrics|reporting` 生产 import 恰 3 条、冻结快照护栏），并明确 K7「analytics 的 `analysis.benchmarks` 生产写者为 0」未解除 ⇒ ③「core 加 HTTP 客户端 + 切读」与 ⑤「core 重复实现删除」均不成立。本单按 ④「不在没有消费者时宣称 G3」**如实维持 ⛔**，不硬翻。
 
-### QT-43 · X4 分析服务（基准 / 归因 / 敏感性 / 蒙特卡洛）[P1] 🔶
+### QT-43 · X4 分析服务（基准 / 归因 / 敏感性 / 蒙特卡洛）[P1] ✅（2026-11-10 收口）
 
 > **迁入说明（2026-10-21）**：本单自 core 仓 `tellurion:docs/TASKS.md`「五、X 线」迁入（任务台账批量重分布：X 线单展开到各服务仓为正式六字段单，「占位仓不写正式任务单」旧约定同时作废）。六字段正文逐字保留、不改写；core 侧同号条目已改为指针。
 >
@@ -406,6 +406,27 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 **本仓侧**：`internal/upstream.ResultReader` 按**契约 code**（不解析文案）映射 —— 409 `run_result_incomplete` → `IncompleteError{Missing:status}`、409 `run_result_failed` → `FailedError`、未知 409 fail-closed 成 `dependency_unavailable`；404 语义不变。
 
 **门禁（真实输出）**：`gofmt -l internal` 空；`go build ./...` = 0；`go test ./internal/upstream -count=1` = 0（新增 3 条用例：failed / running / 未知 409）。**破坏验证**：把 409 分支改回 `ErrRunNotFound` ⇒ `TestResultReader_PersistentK9ReadPlane` 的 failed 腿与 `TestG4UpstreamFailureSemantics/409 conclusion not ready` 同时红；按备份还原后 `sha256` 一致、复跑绿。
+
+#### 收口记录（2026-11-10，QT-43 → ✅；本仓零代码改动）
+
+> 判定口径：按本单 ⑤ 三条逐条给证据；剩余项逐条对照 ⑥「只做分析与指标；报表呈现归 UI 仓」确认是否在边界内。**结论 = ⑤ 全部满足，剩余项全部在 ⑥ 边界外或属不可逆历史数据 ⇒ 收口。** 与 `tellurion-risk` QT-42 的收口先例同型（四条未落项均在 ⑥ 边界外 ⇒ ✅）。
+>
+> | ⑤ 判据 | 证据（用例 / 真库腿） |
+> |---|---|
+> | 同一 run + 同一 seed 两次分析结果一致 | `internal/analysis/report_test.go:TestReportIDIsDeterministicAndKeySensitive`（`report_id` 由 `hash(run_id, analysis_type, params_hash, input_hash, seed, metrics_version)` 决定、同键重放字节一致）、`montecarlo_test.go:TestServiceMonteCarloReplayIsByteIdentical`、`httpapi/g1_test.go:TestSyncPostIsIdempotentOnSameInput`；真库层 `pgstore_test.go:TestPGReportSeedRoundTrip` / `TestPGMigrateIdempotent` |
+> | 归因分项和 ≈ 总收益（容差写明） | `attribution_test.go:TestBuildBrinsonAttributionIdentity` / `TestBuildFactorAttributionIdentity`（恒等式钉在 `1e-8`）、`TestServiceAttributionPersistsResidual`（residual 落库可查） |
+> | 缺 seed 直接拒绝 | `montecarlo_test.go:TestServiceMonteCarloSeedRules` + `httpapi/api_test.go:TestMonteCarloSeedWireCodes`（wire code 可区分） |
+>
+> **剩余项逐条定性（都不构成本单未完成）**：
+> 1. **token 跨仓签发 / 分发**：本仓无部署面，且本单 / 派发明令「不许在本仓造 token 分发机制」⇒ ⑥ 边界外。本仓侧已落 `NewSensitivityQueueWithToken` + `ANALYTICS_ORCHESTRATION_TOKEN`（2026-11-09）。
+> 2. **Migration 059 存量回填不可逆**：历史行一律 `completed`，无法反推真实 invalid；属历史数据，不是分析服务实现缺口 ⇒ 不可逆，非本单可做。
+> 3. **R1 偏差①（读面三态）**：**已结清**——core K4 落地 404 `run_not_found` / 409 `run_result_incomplete` / 409 `run_result_failed`，本仓 `ResultReader` 按契约 code 映射（2026-11-10 两条记录）。
+> 4. **R2 不迁 contracts**：裁决 ③ 已定 owner = 本仓 + 守卫 `TestUpstreamContractOwnerStaysLocal`，迁移不是本单要求 ⇒ 非未落项。
+> 5. **PDF 导出**：R5 已裁为非目标（只承诺 html / csv）。
+>
+> **同轮复核（SVC-AN-G3 维持 ⛔）**：core 非测试 Go 对 `analytics-service` / `ANALYTICS_URL` / `8087` 仍零命中，`SVC-CORE-AN-RETIRE` 结论「保留并冻结」，K7「`analysis.benchmarks` 生产写者为 0」未解除 ⇒ 无消费者，按 ④ 不宣称 G3。该单已在前述 2026-11-10 复核块记录，本轮无变化。
+>
+> **门禁（本轮真实输出）**：`gofmt -l .` 空（0）、`go build ./...` = 0、`go vet ./...` = 0、`go test ./... -count=1` = 0（4 包 ok：cmd/analyticsservice / internal/analysis / internal/httpapi / internal/upstream）。
 
 ---
 
