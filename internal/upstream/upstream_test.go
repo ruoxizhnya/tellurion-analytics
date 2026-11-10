@@ -160,17 +160,36 @@ func TestResultReader_PersistentK9ReadPlane(t *testing.T) {
 			resultStatus: "",
 		},
 		{
-			// 偏差（docs/ARCHITECTURE.md §9.7 R1）：端点仍要求队列态 completed，
-			// 所以 K9 的 failed 经持久面到不了本仓的 409 run_result_failed。
-			name:         "engine failure: queue status failed -> 404 -> run_not_found",
+			// K4（裁决 ⑲）之后 core 读面按三态回：failed 走 409 run_result_failed，
+			// 不再和「不存在」共用 404。
+			name:         "engine failure: 409 run_result_failed -> FailedError",
 			queueStatus:  "failed",
 			resultStatus: "failed",
-			wantErr:      analysis.ErrRunNotFound,
+			check: func(t *testing.T, err error) {
+				var failed *analysis.FailedError
+				if !errors.As(err, &failed) {
+					t.Fatalf("want FailedError, got %v", err)
+				}
+				if failed.Message == "" {
+					t.Fatal("FailedError 应带上游 error 文案")
+				}
+			},
 		},
 		{
-			name:        "still running: queue running + NULL column -> 404 -> run_not_found",
+			name:        "still running: 409 run_result_incomplete -> IncompleteError",
 			queueStatus: "running",
-			wantErr:     analysis.ErrRunNotFound,
+			check: func(t *testing.T, err error) {
+				var incomplete *analysis.IncompleteError
+				if !errors.As(err, &incomplete) || incomplete.Missing != "status" {
+					t.Fatalf("want IncompleteError{Missing:status}, got %v", err)
+				}
+			},
+		},
+		{
+			// 未知 409 code 不猜语义：仍按依赖不可用 fail-closed。
+			name:        "unknown 409 code fails closed",
+			queueStatus: "weird",
+			wantErr:     analysis.ErrDependencyUnavailable,
 		},
 	}
 	for _, tc := range tests {
@@ -179,9 +198,20 @@ func TestResultReader_PersistentK9ReadPlane(t *testing.T) {
 				if r.URL.Path != "/api/backtest/run-1/report" {
 					t.Errorf("unexpected path %s", r.URL.Path)
 				}
-				if tc.queueStatus != "completed" {
-					w.WriteHeader(http.StatusNotFound)
-					_, _ = w.Write([]byte(`{"error":"backtest not found or not completed"}`))
+				switch tc.queueStatus {
+				case "completed":
+					// 继续走 200 结果体。
+				case "failed":
+					w.WriteHeader(http.StatusConflict)
+					_, _ = w.Write([]byte(`{"code":"run_result_failed","error":"engine exploded"}`))
+					return
+				case "weird":
+					w.WriteHeader(http.StatusConflict)
+					_, _ = w.Write([]byte(`{"code":"something_new","error":"?"}`))
+					return
+				default:
+					w.WriteHeader(http.StatusConflict)
+					_, _ = w.Write([]byte(`{"code":"run_result_incomplete","error":"backtest run is not finished yet"}`))
 					return
 				}
 				report := map[string]any{

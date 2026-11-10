@@ -49,7 +49,7 @@ verified-by: `SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 a
 > **⛔ 开工前置复核（2026-10-26，未开工）**：
 > - **无消费方，停写条件不成立**：audit P0-2 实测 core **零调用方**，core 仍在 `cmd/analysis` 直接算指标/报告；没有消费者就无法按 ④「不在没有消费者时宣称 G3」开工。
 > - **token 跨仓分发未落**：本仓只校验 token，签发与分发在 core / kit；跨仓腿未闭合。
-> - **R1 残留**：读面「结论态放行」改在 core（第三轮裁决 ⑲），本仓 wire 码就绪但 core 侧未切。
+> - **R1 残留**：~~读面「结论态放行」改在 core（第三轮裁决 ⑲），本仓 wire 码就绪但 core 侧未切。~~ **2026-11-10 已切**：core K4 落地三态码（404 `run_not_found` / 409 `run_result_incomplete` / 409 `run_result_failed`），本仓 `ResultReader` 按 code 映射（不解析文案）；本仓 wire 三态因此首次全量可达。
 > - **如实登记**：`go.mod` 无 `tellurion-contracts`，本轮未引入；未动 core `/report` 与分析口径。
 >
 > **2026-11-09 调用方腿（`SVC-ORCH-G1` 全量 R5 的跨仓部分）**：本仓是 orchestration 的调用方（`POST /api/runs/parents`、`GET /api/runs/parents/{id}`）。`internal/upstream` 新增 `NewSensitivityQueueWithToken`（旧构造函数保留 = 空 token），`cmd/analyticsservice` 新增 `-orchestration-token` / `ANALYTICS_ORCHESTRATION_TOKEN`（缺省读 `ORCHESTRATION_SERVICE_TOKEN`）；`docker-compose.services.yml` 注入空占位。门禁：`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全 0。**token 签发与分发仍不在本仓**（同 ④）。
@@ -394,8 +394,18 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 **结论与边界**
 
 - 「真 core 进程 + 真 PG 的 invalid 行 → 本仓 409 `run_result_invalid` + reasons 原样透传」这条链**已有当前证据**，上一条未落项第 5 条据此结清。
-- **仍未证 / 不在本仓**：① `pending` / `running` 与引擎故障行仍读成 404（core 队列态放行，R1 偏差①）；② Migration 059 回填的存量 invalid 读不回（R1 偏差②）；③ token 跨仓签发 / 分发；④ R2 不迁 contracts（owner 已裁、守卫在位）。本单仍 🔶。
+- **仍未证 / 不在本仓**：① ~~`pending` / `running` 与引擎故障行仍读成 404~~（**2026-11-10 已结清**，见下条施工记录）；② Migration 059 回填的存量 invalid 读不回（R1 偏差②，裁决 ⑲ 已登记为不可恢复）；③ token 跨仓签发 / 分发；④ R2 不迁 contracts（owner 已裁、守卫在位）。本单仍 🔶。
 - 可复现命令已写进 `docs/runbook.md` §9。本腿**不产生自动化守卫**：单仓 checkout 拿不到 core 源码 / 二进制，跨仓 e2e 不进本仓 CI；core overlay 若变，`internal/upstream/upstream.go` 的出处注释是唯一提醒。
+
+#### 施工记录（2026-11-10，R1 三态收口：core K4 + 本仓按 code 映射）
+
+**根因**：core 读面 `job == nil || job.Status != "completed"` 一律 404，把「没跑完」「跑失败」和「不存在」混成 `run_not_found`（R1 偏差①）。
+
+**core 侧（K4 / 裁决 ⑲）**：`cmd/analysis/handlers_backtest.go` 四处读面（report / trades / equity / export）改三态 —— 404 `run_not_found`、409 `run_result_incomplete`（非终态）、409 `run_result_failed`（失败）；`completed`（含 `result_status=invalid`）仍 200。`docs/openapi.yaml` 四处响应码 + `RunNotFound` / `RunResultNotReady` 组件同步。为此在 kit 增加 `httpserver.FailCode`（v0.3.0，只增不改）并升 pin。
+
+**本仓侧**：`internal/upstream.ResultReader` 按**契约 code**（不解析文案）映射 —— 409 `run_result_incomplete` → `IncompleteError{Missing:status}`、409 `run_result_failed` → `FailedError`、未知 409 fail-closed 成 `dependency_unavailable`；404 语义不变。
+
+**门禁（真实输出）**：`gofmt -l internal` 空；`go build ./...` = 0；`go test ./internal/upstream -count=1` = 0（新增 3 条用例：failed / running / 未知 409）。**破坏验证**：把 409 分支改回 `ErrRunNotFound` ⇒ `TestResultReader_PersistentK9ReadPlane` 的 failed 腿与 `TestG4UpstreamFailureSemantics/409 conclusion not ready` 同时红；按备份还原后 `sha256` 一致、复跑绿。
 
 ---
 

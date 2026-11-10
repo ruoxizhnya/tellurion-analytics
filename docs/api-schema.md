@@ -173,12 +173,19 @@ verified-by: 2026-11-07 SVC-AN-G4 补五类上游失败（401 / 404 / 409 / 503 
 
 **fail-closed 规则**：`status` 不在三值内 ⇒ 拒算。B6-3 之后「无 status」**不再是异步结果的合法旧编码**，出现它只意味着上游部署没升到 R1 —— 照样 409，不当 completed、不猜状态。**禁止**从 `"backtest produced an invalid run: ..."` 之类字符串反推状态。
 
-**残留偏差（在 core 侧，本仓不猜、也不二次调用去补）**：
+**残留偏差与处置**（core 侧）：
 
-1. report 端点仍要求**队列态** `status=="completed"` 才可读 ⇒ pending / running 与引擎故障行（`status=failed` + `result_status=failed`）经持久面一律 **404**，本仓映射成 `404 run_not_found`；K9 的 `failed` 因此只能经 core 的内存态路径到达（`409 run_result_failed`）。
-2. Migration 059 把迁移前的完成行回填成 `completed`（旧代码当时把 invalid 写成 `status=failed`），那批历史行读不回 invalid。
+1. ~~report 端点仍要求**队列态** `status=="completed"` 才可读 ⇒ pending / running 与引擎故障行一律 **404**。~~
+   **2026-11-10 已结清（core K4 / 裁决 ⑲）**：core 读面改成三态 —— 404 `run_not_found`、
+   409 `run_result_incomplete`（pending / running）、409 `run_result_failed`（failed）。
+   本仓 `ResultReader` 按契约 `code` 映射（不解析错误文案）：前两者 → `409 run_result_incomplete`
+   （`missing=status`）/ `409 run_result_failed`，未知 409 仍 fail-closed 成 `503 dependency_unavailable`。
+2. Migration 059 把迁移前的完成行回填成 `completed`（旧代码当时把 invalid 写成 `status=failed`），
+   那批历史行读不回 invalid —— **按裁决 ⑲ 登记为不可恢复**（信息已丢，不做二次推断）。
 
-两条各有一条用例钉住（`internal/upstream.TestResultReader_PersistentK9ReadPlane`，按 core 的 overlay 建模）；要把它们变成正确语义，得先裁「读面按队列态还是结论态放行」，属 core 侧的改动。
+偏差 2 有一条用例钉住（`internal/upstream.TestResultReader_PersistentK9ReadPlane`）；三态映射另有
+`engine failure: 409 run_result_failed` / `still running: 409 run_result_incomplete` /
+`unknown 409 code fails closed` 三条用例。
 
 ### 6.2 R2 artifact 面 — `PortfolioSnapshot` / `FactorExposures`
 

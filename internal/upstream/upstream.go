@@ -88,6 +88,12 @@ func readErrorBody(r io.Reader) string {
 // K9 的 `failed` 经持久面到不了 409；② 迁移前的存量行按「旧代码把 invalid 写成 failed」
 // 回填成 completed，那批行读不回 invalid。
 //
+// **2026-11-10 订正**：偏差 ① 已由 core 侧 K4（裁决 ⑲）修掉 —— 读面改成三态
+// （404 `run_not_found` / 409 `run_result_incomplete` / 409 `run_result_failed`）。
+// 本适配器按**契约 code** 映射（不解析错误文案），pending/running → IncompleteError、
+// failed → FailedError，未知 409 仍 fail-closed 成 dependency_unavailable。
+// 偏差 ② 是历史数据不可逆，按裁决登记为不可恢复。
+//
 // **绝不**解析 `"backtest produced an invalid run: ..."` 之类的错误串还原状态
 // （docs/ARCHITECTURE.md §9.1 F1）。缺 status 一律 fail-closed：R1 之后这只可能是
 // 没升级到 B6-3 的上游。
@@ -137,6 +143,23 @@ func (r *ResultReader) GetResult(ctx context.Context, runID string) (*analysis.B
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, analysis.ErrRunNotFound
+	}
+	// core 读面三态（K4 / 裁决 ⑲）：按契约 code 分支，不解析错误文案。
+	// 未知 409 不猜语义，仍按依赖不可用 fail-closed。
+	if resp.StatusCode == http.StatusConflict {
+		var body struct {
+			Code  string `json:"code"`
+			Error string `json:"error"`
+		}
+		_ = json.NewDecoder(io.LimitReader(resp.Body, 512)).Decode(&body)
+		switch body.Code {
+		case "run_result_incomplete":
+			return nil, &analysis.IncompleteError{Missing: "status", Detail: body.Error}
+		case "run_result_failed":
+			return nil, &analysis.FailedError{Message: body.Error}
+		}
+		return nil, fmt.Errorf("%w: get run result %s: upstream %s (code=%q)",
+			analysis.ErrDependencyUnavailable, runID, resp.Status, body.Code)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("%w: get run result %s: upstream %s: %s",
