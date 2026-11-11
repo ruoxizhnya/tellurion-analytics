@@ -1,5 +1,7 @@
 # tellurion-analytics
 
+> 5 分钟了解本服务：[SERVICE.md](SERVICE.md)
+
 > module: `tellurion-analytics` ｜ 状态：**X4 已收口（2026-11-10，QT-43）** —— 8 条端点 + PG Store + 四个上游适配器已接线；剩余仅 K7 挂起项
 
 分析服务：基准 / 归因 / 敏感性 / 蒙特卡洛。**纯函数、只读上游**——不持有跨请求状态、不写别人的表；只写自己的结果表 `analysis.*`。
