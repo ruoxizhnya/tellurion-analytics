@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -25,9 +26,10 @@ const (
 	metricDriftRelTol = 1e-9
 	metricDriftAbsTol = 0.01
 
-	// goldenFixtureHash 是 fixture 的文件内容 hash。改 fixture（含重算基线）
-	// 必须走 ADR-039 T2 流程并同步更新这里，否则本测试先拦下。
-	goldenFixtureHash = "06fde5ca45a10a6b5b0dd1139ce20aab71ad66596702dc9698d84802f233d325"
+	// goldenFixtureHash 是 fixture 的内容 hash（对 CRLF 归一化为 LF 后计算，
+	// 避免 Windows / Linux 检出差异误报）。改 fixture（含重算基线）必须走
+	// ADR-039 T2 流程并同步更新这里，否则本测试先拦下。
+	goldenFixtureHash = "5d76f530ffbb128ec66c6b5e938625296cee1f64b1393de219d093962821f998"
 )
 
 type goldenRunFixture struct {
@@ -45,7 +47,7 @@ func TestComputedMetrics_NoDriftAgainstCoreGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden fixture: %v", err)
 	}
-	sum := sha256.Sum256(raw)
+	sum := sha256.Sum256(bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n")))
 	if got := hex.EncodeToString(sum[:]); got != goldenFixtureHash {
 		t.Fatalf("golden fixture 被改动（%s != %s）；按 ADR-039 T2 重算基线并更新哈希", got, goldenFixtureHash)
 	}

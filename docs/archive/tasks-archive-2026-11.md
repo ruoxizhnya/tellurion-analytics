@@ -570,7 +570,7 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 - **重开条件**：本条不挂起——它是 ADR-039 T2 的前置。
 
 > **施工记录（2026-11-11）**：
-> - **fixture**：`internal/analysis/testdata/core-run-metrics.golden.json`。**如实标注为 `kind=synthetic_nav`**：确定性 60 点日净值（2025-01-02 起），`core_metrics` 由 core 权威实现 `tellurion/pkg/backtest/metrics.CalculateMetrics` 在 2026-11-11 生成，**不是捕获的真实 run artifact**。fixture 文件 hash pin 在测试里（`06fde5ca…`），手改会先被拦下。
+> - **fixture**：`internal/analysis/testdata/core-run-metrics.golden.json`。**如实标注为 `kind=synthetic_nav`**：确定性 60 点日净值（2025-01-02 起），`core_metrics` 由 core 权威实现 `tellurion/pkg/backtest/metrics.CalculateMetrics` 在 2026-11-11 生成，**不是捕获的真实 run artifact**。fixture 内容 hash pin 在测试里（`5d76f530…`，CRLF 归一化为 LF 后计算，跨平台一致），手改会先被拦下。
 > - **对拍腿**：`TestComputedMetrics_NoDriftAgainstCoreGolden` 用本仓 `buildMetricsPayload` 重算 volatility / var_95 / cvar_95，逐项与 fixture 的 core 值比较；阈值 `rel > 1e-9`，基准为 0 时退化为 `abs > 0.01`。
 > - **阈值自身**：`TestIsMetricDrift_Thresholds` 钉住判定边界（含 1e-13 浮点噪声不判漂移、2e-9 判漂移），防止有人放大阈值来「变绿」。
 > - **门禁（真实退出码）**：`gofmt -l` 空；`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全绿（4 包 ok）。
