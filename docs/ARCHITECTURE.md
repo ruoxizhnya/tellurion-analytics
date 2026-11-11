@@ -12,7 +12,7 @@ verified-by: 主任裁决 A（ADR-0005）：定位独立只读分析服务/参�
 
 它出仓的理由不是"计算重"（core 也能算），而是这些分析**互相独立、可并行、结果可缓存**，且天然是"给报告用的"，不进入决策热路径。
 
-**定位裁决（2026-11-10，[ADR-0005](adr/0005-独立只读参考实现-core不迁移.md)）**：本仓是**独立只读分析服务 / 参考实现**，不承担 core 迁移目标。**权威关系与收敛条件**由跨仓 [ADR-039](https://github.com/ruoxizhnya/tellurion-docs/blob/main/docs/adr/adr-039-metric-authority-and-dual-implementation.md) 钉死：core 的 `pkg/backtest/metrics` 是运行时权威，本仓只读参考；三条可判定收敛触发见该 ADR §3 D4（其中 T2「漂移超限」在 `ANALYTICS-METRIC-DRIFT` 落地前**不可判定**）。core `pkg/backtest/metrics` / `reporting` 保留并冻结（`SVC-CORE-AN-RETIRE`），`SVC-AN-G3` 关闭，K7（`analysis.benchmarks` 生产写者为 0）挂起。若未来产品需要统一分析 API，须新立 ADR + 任务单，不得直接解冻已删/冻结路径。
+**定位裁决（2026-11-10，[ADR-0005](adr/0005-独立只读参考实现-core不迁移.md)）**：本仓是**独立只读分析服务 / 参考实现**，不承担 core 迁移目标。**权威关系与收敛条件**由跨仓 [ADR-039](https://github.com/ruoxizhnya/tellurion-docs/blob/main/docs/adr/adr-039-metric-authority-and-dual-implementation.md) 钉死：core 的 `pkg/backtest/metrics` 是运行时权威，本仓只读参考；三条可判定收敛触发见该 ADR §3 D4；其中 T2「漂移超限」已由 `internal/analysis/metrics_drift_test.go` + `testdata/core-run-metrics.golden.json` 落地为常规 `go test` 腿（当前 fixture 为 `kind=synthetic_nav`，真实 run artifact 腿见 `ANALYTICS-METRIC-DRIFT` 归档的重开条件）。core `pkg/backtest/metrics` / `reporting` 保留并冻结（`SVC-CORE-AN-RETIRE`），`SVC-AN-G3` 关闭，K7（`analysis.benchmarks` 生产写者为 0）挂起。若未来产品需要统一分析 API，须新立 ADR + 任务单，不得直接解冻已删/冻结路径。
 
 ## 2. 分层
 

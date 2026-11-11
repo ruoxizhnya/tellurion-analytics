@@ -1,0 +1,380 @@
+{
+  "source": "tellurion/pkg/backtest/metrics.CalculateMetrics",
+  "kind": "synthetic_nav",
+  "note": "deterministic 60-point nav; core_metrics produced by core authoritative implementation on 2026-11-11; not a captured real run",
+  "generated_at": "2026-11-11",
+  "risk_free_rate": 0,
+  "portfolio_values": [
+    {
+      "date": "2025-01-02T00:00:00Z",
+      "total_value": 1000000,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-03T00:00:00Z",
+      "total_value": 1010000,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-04T00:00:00Z",
+      "total_value": 1003940,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-05T00:00:00Z",
+      "total_value": 1007955.76,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-06T00:00:00Z",
+      "total_value": 1021059.18488,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-07T00:00:00Z",
+      "total_value": 1009827.53384632,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-08T00:00:00Z",
+      "total_value": 1011847.1889140126,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-09T00:00:00Z",
+      "total_value": 1008811.6473472706,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-10T00:00:00Z",
+      "total_value": 1016882.1405260488,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-11T00:00:00Z",
+      "total_value": 1022983.4333692051,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-12T00:00:00Z",
+      "total_value": 1013776.5824688822,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-13T00:00:00Z",
+      "total_value": 1014790.359051351,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-14T00:00:00Z",
+      "total_value": 1021893.8915647103,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-15T00:00:00Z",
+      "total_value": 1017806.3159984514,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-16T00:00:00Z",
+      "total_value": 1022895.3475784436,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-17T00:00:00Z",
+      "total_value": 1020849.5568832867,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-18T00:00:00Z",
+      "total_value": 1033099.7515658861,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-19T00:00:00Z",
+      "total_value": 1019669.4547955296,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-20T00:00:00Z",
+      "total_value": 1022728.4631599161,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-21T00:00:00Z",
+      "total_value": 1022728.4631599161,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-22T00:00:00Z",
+      "total_value": 1028864.8339388756,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-23T00:00:00Z",
+      "total_value": 1023720.5097691813,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-24T00:00:00Z",
+      "total_value": 1032933.9943571038,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-25T00:00:00Z",
+      "total_value": 1025703.4563966041,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-26T00:00:00Z",
+      "total_value": 1029806.2702221905,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-27T00:00:00Z",
+      "total_value": 1041134.1391946345,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-28T00:00:00Z",
+      "total_value": 1030722.7978026882,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-29T00:00:00Z",
+      "total_value": 1032784.2433982936,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-30T00:00:00Z",
+      "total_value": 1037948.164615285,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-01-31T00:00:00Z",
+      "total_value": 1036910.2164506697,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-01T00:00:00Z",
+      "total_value": 1045205.4981822751,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-02T00:00:00Z",
+      "total_value": 1038934.2651931815,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-03T00:00:00Z",
+      "total_value": 1042051.0679887609,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-04T00:00:00Z",
+      "total_value": 1052471.5786686486,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-05T00:00:00Z",
+      "total_value": 1039841.9197246248,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-06T00:00:00Z",
+      "total_value": 1044001.2874035233,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-07T00:00:00Z",
+      "total_value": 1045045.2886909267,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-08T00:00:00Z",
+      "total_value": 1041910.152824854,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-09T00:00:00Z",
+      "total_value": 1049203.5238946278,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-10T00:00:00Z",
+      "total_value": 1054449.5415141007,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-11T00:00:00Z",
+      "total_value": 1046013.945181988,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-12T00:00:00Z",
+      "total_value": 1048105.9730723519,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-13T00:00:00Z",
+      "total_value": 1054394.608910786,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-14T00:00:00Z",
+      "total_value": 1050177.0304751429,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-15T00:00:00Z",
+      "total_value": 1059628.623749419,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-16T00:00:00Z",
+      "total_value": 1057509.3665019204,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-17T00:00:00Z",
+      "total_value": 1060681.894601426,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-18T00:00:00Z",
+      "total_value": 1072349.3954420416,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-19T00:00:00Z",
+      "total_value": 1057336.503905853,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-20T00:00:00Z",
+      "total_value": 1062623.1864253823,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-21T00:00:00Z",
+      "total_value": 1063685.8096118076,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-22T00:00:00Z",
+      "total_value": 1056240.008944525,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-23T00:00:00Z",
+      "total_value": 1064689.9290160812,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-24T00:00:00Z",
+      "total_value": 1066819.3088741133,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-25T00:00:00Z",
+      "total_value": 1063618.850947491,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-26T00:00:00Z",
+      "total_value": 1070000.5640531757,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-27T00:00:00Z",
+      "total_value": 1074280.5663093885,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-02-28T00:00:00Z",
+      "total_value": 1064612.041212604,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-03-01T00:00:00Z",
+      "total_value": 1075258.1616247299,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-03-02T00:00:00Z",
+      "total_value": 1076333.4197863545,
+      "cash": 0,
+      "positions": 0
+    },
+    {
+      "date": "2025-03-03T00:00:00Z",
+      "total_value": 1070951.7526874228,
+      "cash": 0,
+      "positions": 0
+    }
+  ],
+  "core_metrics": {
+    "cvar_95": -0.012499999999999968,
+    "var_95": -0.010999999999999956,
+    "volatility": 0.10983284680498841
+  }
+}

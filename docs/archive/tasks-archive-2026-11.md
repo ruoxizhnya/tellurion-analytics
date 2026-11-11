@@ -14,6 +14,7 @@
 | SVC-AN-G1 | 服务就绪门 G1：版本化 · 错误模型闭合 · 幂等 · 分页 · 就绪探针（ADR-036） | 2026-11-07 | `f010606` | [原文](#SVC-AN-G1) |
 | SVC-AN-G2 | 服务就绪门 G2：`analysis.*` 唯一 writer 与可重放迁移（ADR-036） | 2026-11-07 | —（原文未记） | [原文](#SVC-AN-G2) |
 | SVC-AN-G4 | 服务就绪门 G4：纯函数口径 · 上游失败语义 · runbook（ADR-036） | 2026-11-07 | —（原文未记） | [原文](#SVC-AN-G4) |
+| ANALYTICS-METRIC-DRIFT | 与 core 指标实现的漂移检测缺失（ADR-039 T2 前置） | 2026-11-11 | 见本条「施工记录」 | [原文](#ANALYTICS-METRIC-DRIFT)；[`../ARCHITECTURE.md`](../ARCHITECTURE.md) |
 
 ---
 
@@ -556,3 +557,22 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 | CT-04 | 编排提交报文形状已落 contracts（`run.ParentSubmitRequest` / `ParentBatchRequest` / `ParentWalkForwardRequest` / `ParentWindows` + 子 run 幂等键） | `tellurion-contracts:docs/TASKS.md`（✅ 2026-11-07，本地 tag `v0.8.0` **未 push**）；本仓 `internal/upstream/sensitivity.go` 的本地提交 DTO 改用契约类型**待立单**（前置 = tag 推远端后升 pin）；本指针不含正文 |
 
 ---
+
+<a id="ANALYTICS-METRIC-DRIFT"></a>
+### ANALYTICS-METRIC-DRIFT · 与 core 指标实现的漂移检测缺失 [P1] ✅（2026-11-11）
+
+- **① 目标**：让「core 指标」与「本仓同名指标」的漂移变成**可判定**的事实，而不是靠人工比对；这是跨仓 ADR-039 §3 D4-T2「漂移超限」收敛触发条件的量测前置。
+- **② 上下文**：ADR-039 判 core 的 `pkg/backtest/metrics` 是运行时权威、本仓是只读参考实现，并要求「同一 golden fixture 在两侧产出的同名指标，连续两个版本相对差 > 1e-9 / 绝对差 > 0.01 元」判漂移。此前两侧各自有单测，但没有任何一条腿把同一份输入喂给两边做对拍。
+- **③ 要求**：① 选一次真实 core run 的 artifact（净值 + 交易 + 持仓）冻结成 fixture；② 用本仓 `internal/analysis` 计算与 core 同名的指标并做阈值判定；③ 差异按 B3「以 core 为准」归因本仓；④ 可单测跑；⑤ fixture 生成方式写进测试注释，不许手改数字。
+- **④ 约束与非目标**：不 import core 的 `pkg/backtest/metrics`（ADR-0001）；不把 fixture 当权威；不改两侧任何公式来「让对拍变绿」。
+- **⑤ 验收**：`go test ./... -count=1` 全绿且对拍腿实际执行；人为把本仓某个指标改 1e-6 ⇒ 对拍红；还原复绿。
+- **⑥ 边界**：本仓测试与 fixture；core 侧只提供 artifact 形状，不改 core 代码。
+- **重开条件**：本条不挂起——它是 ADR-039 T2 的前置。
+
+> **施工记录（2026-11-11）**：
+> - **fixture**：`internal/analysis/testdata/core-run-metrics.golden.json`。**如实标注为 `kind=synthetic_nav`**：确定性 60 点日净值（2025-01-02 起），`core_metrics` 由 core 权威实现 `tellurion/pkg/backtest/metrics.CalculateMetrics` 在 2026-11-11 生成，**不是捕获的真实 run artifact**。fixture 文件 hash pin 在测试里（`06fde5ca…`），手改会先被拦下。
+> - **对拍腿**：`TestComputedMetrics_NoDriftAgainstCoreGolden` 用本仓 `buildMetricsPayload` 重算 volatility / var_95 / cvar_95，逐项与 fixture 的 core 值比较；阈值 `rel > 1e-9`，基准为 0 时退化为 `abs > 0.01`。
+> - **阈值自身**：`TestIsMetricDrift_Thresholds` 钉住判定边界（含 1e-13 浮点噪声不判漂移、2e-9 判漂移），防止有人放大阈值来「变绿」。
+> - **门禁（真实退出码）**：`gofmt -l` 空；`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全绿（4 包 ok）。
+> - **破坏验证（真做真还原）**：临时把本仓 `calculateVaR` 的分位改为 `idx+1` ⇒ 对拍腿 **FAIL**（`指标漂移 var_95：analytics=-0.009999999999999962 core=-0.010999999999999956`）；还原后 PASS。
+> - **未执行（如实）**：③ 的「真实 core run artifact（净值 + 交易 + 持仓）」腿**未跑**——需要带 seed 数据与行情库的真栈。补齐条件：真栈可复跑一次 completed run 后，把其 artifact 替换/新增为本 fixture（`kind=real_run`，记录 run id + 日期），并按 ADR-039 T2 更新 hash 与基线。该腿未落地前，T2 对「真实 run 的天然漂移」仍只有合成序列覆盖。
