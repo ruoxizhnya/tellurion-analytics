@@ -16,6 +16,7 @@
 | SVC-AN-G4 | 服务就绪门 G4：纯函数口径 · 上游失败语义 · runbook（ADR-036） | 2026-11-07 | —（原文未记） | [原文](#SVC-AN-G4) |
 | ANALYTICS-METRIC-DRIFT | 与 core 指标实现的漂移检测缺失（ADR-039 T2 前置） | 2026-11-11 | 见本条「施工记录」 | [原文](#ANALYTICS-METRIC-DRIFT)；[`../ARCHITECTURE.md`](../ARCHITECTURE.md) |
 | AN-GRACEFUL-SHUTDOWN | 分析服务无优雅停机，SIGTERM 直接掐断在途请求 | 2026-11-12 | 见本条「施工记录」 | [原文](#AN-GRACEFUL-SHUTDOWN)；`tellurion-docs:docs/archive/odr/odr-072-audit-wave5-security-reliability-deps.md` |
+| AN-REPORT-CONFLICT-409 | 写侧不可变冲突 `ErrReportConflict` 被误归 500 internal | 2026-11-12 | 见本条「施工记录」 | [原文](#AN-REPORT-CONFLICT-409)；`tellurion-docs:docs/archive/odr/odr-069-audit-wave2-core-architecture.md` |
 
 ---
 
@@ -594,3 +595,21 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 > - **用例**：`cmd/analyticsservice/main_test.go` 新增两条（真 listener + 真 HTTP 请求，用 `cancel()` 等价 SIGTERM；Windows 不支持向子进程投递 SIGTERM/os.Interrupt，故走与 main 相同的 `serve` 路径）：`TestServeDrainsInFlightRequestsOnSignal`（慢请求在 drain 窗口内 200 完成、serve 返回 nil、处理器在 serve 返回前已结束）与 `TestServeDrainTimeoutForcesClose`（drain=10ms 小于处理器 500ms ⇒ serve 非 nil、请求被强制断开，证明窗口有界）。
 > - **验收（真实输出）**：`go build ./...` 通过；`go vet ./cmd/analyticsservice` 无输出；`go test ./cmd/analyticsservice -count=1` → `ok tellurion-analytics/cmd/analyticsservice 0.404s`。
 > - **破坏验证（真做真还原）**：把 `serve` 的 ctx.Done 分支改成「收到信号立即 `return nil`」（删掉 `Shutdown` 块）⇒ `TestServeDrainsInFlightRequestsOnSignal` 红（`main_test.go:136: serve returned before the in-flight handler finished (request not drained)`）；逐字还原后同一命令复绿。
+
+<a id="AN-REPORT-CONFLICT-409"></a>
+### AN-REPORT-CONFLICT-409 · 写侧不可变冲突 `ErrReportConflict` 被误归 500 internal [P3] ✅（2026-11-12）
+
+- **① 目标**：让「同 `report_id` 异内容」这类写侧不可变冲突回 **409**（带稳定 wire code），而不是落进 `classify` 的 `default` 被报成 500 `internal`——调用方据此能区分「我重复提交了不同内容」（不可重试）与「服务真坏了」（可重试）。
+- **② 上下文（2026-11-11 全面审查 W2-F12，证据 ODR-069 `tellurion-docs:docs/archive/odr/odr-069-audit-wave2-core-architecture.md`）**：`internal/analysis/errors.go:18` 定义 `ErrReportConflict`；`internal/analysis/pgstore.go:126`（注释「已存在且 completed：只允许同键同内容（no-op），否则 ErrReportConflict」）及 `:194/:267/:295/:349/:354/:360` 多处 `return ErrReportConflict`（PutReport/PutAttribution/PutMonteCarlo 写侧）。但 `internal/httpapi/api.go:357-393` 的 `classify()` switch **没有 `ErrReportConflict` 分支**（grep 零命中）⇒ 落 `default: return http.StatusInternalServerError, "internal", nil`。语义上这是 409 Conflict（资源已存在且不可变），却报成 500。`docs/api-schema.md §2` 的 409 词表（`run_result_*` / `benchmark_data_unavailable` / `report_not_ready`）也未登记写侧冲突码。
+- **③ 要求**：① `classify()` 增 `case errors.Is(err, analysis.ErrReportConflict): return http.StatusConflict, "report_conflict", nil`（wire code 名以 api-schema 词表为准，施工时定稿）；② `docs/api-schema.md §2/§3` 登记该 409 码与「同键同内容 no-op / 同键异内容 409 不可重试」的幂等语义；③ 补一条用例：PutReport 同键异内容 ⇒ 409 `report_conflict`（不是 500）。
+- **④ 约束与非目标**：不改 `ErrReportConflict` 的触发条件与 pgstore 写侧逻辑（只改 HTTP 归类）；不动读侧 `run_result_*` 三态码；不引入新哨兵；不改 `reports_completed_immutable` 约束。
+- **⑤ 验收**：新用例断言写侧冲突 = 409 + 登记码；破坏验证 = 删掉 `classify` 的新分支 ⇒ 用例红（回落 500），还原复绿；`go build/vet/test ./... -count=1` 全绿；api-schema 词表与代码一致。
+- **⑥ 边界**：本仓 `internal/httpapi/api.go` 的 `classify` + `docs/api-schema.md` 词表 + 一条用例；写侧领域逻辑不动。
+- **owner**：待定
+
+> **施工记录（2026-11-12）**：
+> - **落点**：`internal/httpapi/api.go` 的 `classify()` 增 `case errors.Is(err, analysis.ErrReportConflict): return 409, "report_conflict", nil`（wire code 定稿 `report_conflict`，snake_case 与既有词表一致）。写侧领域逻辑、`run_result_*` 读侧三态码、`reports_completed_immutable` 约束均未改。
+> - **文档**：`docs/api-schema.md §2` 词表新增「写侧不可变冲突 → 409 `report_conflict`（不可重试）」一行；§3 写死「同键同内容 no-op / 同键异内容 409 不可重试」语义并点名锚点用例；`docs/ARCHITECTURE.md §9.4` 错误码说明补一句「`report_conflict` 对全部写端点生效」，`§9.8` 落地包文件表 13 词 → 14 词（与 api-schema §2 双向一致的如实回填）。
+> - **用例**：`internal/httpapi/api_test.go` 新增 `TestReportConflictIs409`：`conflictStore`（嵌入 `analysis.Memory`、`PutReport` 恒返 `ErrReportConflict`）驱动 `POST /api/analysis/metrics`，断言 409 + `code=report_conflict` 且 `error` 不是 `internal error`。
+> - **验收（真实输出）**：`go test ./internal/httpapi -run TestReportConflictIs409 -count=1 -v` → `PASS`；全量 `go build ./... && go vet ./... && go test ./... -count=1` 全绿（4 包 ok）。
+> - **破坏验证（真做真还原）**：临时删掉 `classify` 的 `ErrReportConflict` 分支 ⇒ 同一用例红（`got 500 map[code:internal error:internal error], want 409 report_conflict`，日志 `httpapi: internal error: report conflict`）；逐字还原后复绿。

@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-12
-verified-by: 2026-11-12 W7 收口：`AN-GRACEFUL-SHUTDOWN` ✅（`signal.NotifyContext` + 有界 drain + 两条用例与真破坏验证，原文与施工记录移入归档）；`AN-REPORT-CONFLICT-409` 仍 ⬜；2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 2 条六字段单，证据坐标引 ODR-072 / ODR-069（`tellurion-docs:docs/archive/odr/`）；W5-F6 原派的 `AN-READYZ-PROBE` 经实测证伪撤销（analytics compose 已是 HTTP `/healthz`，弱探针实属 strategy，见 ODR-072 订正注记）。此前 2026-11-11 `ANALYTICS-METRIC-DRIFT` ✅（跨仓 ADR-039 §3 D4-T2 量测前置：`testdata/core-run-metrics.golden.json`（`kind=synthetic_nav`，core 权威实现产出）+ `TestComputedMetrics_NoDriftAgainstCoreGolden` 三指标对拍 + 阈值边界用例；破坏验证真做真还原；真实 run artifact 腿 ⏸ 见归档重开条件）；QT-43 收口 ✅（2026-11-10：⑤ 三条判据逐条点名用例 + 真库/真 core 腿均已成立；剩余项逐条定性为 ⑥ 边界外或不可逆历史数据——token 跨仓分发、Migration 059 存量回填、R2 owner 已裁；SVC-AN-G3 维持 ⛔）；R1 偏差①收口（2026-11-10：core K4 按裁决 ⑲ 落地 404 `run_not_found` / 409 `run_result_incomplete` / 409 `run_result_failed` 三态码，本仓 `ResultReader` 按契约 code 映射、未知 409 fail-closed；3 条新用例 + 一条破坏验证真做真还原）；`SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 analytics 零命中，且 `SVC-CORE-AN-RETIRE` 结论为「保留并冻结」+ K7 生产写者为 0 ⇒ 无消费者，维持 ⛔）；QT-43 真 core 进程 + 真 PG invalid 行端到端实跑（2026-11-10：core 持久读面 200 `status=invalid` → 本仓 409 `run_result_invalid` + reasons 原样透传，反向对照 404 / 503 各一条，库与进程已清）；QT-43 复核（未落项与 2026-10-26 一字不差）；SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）；**2026-11-10 主任裁决 A（ADR-0005）**：本仓定位独立只读分析服务/参考实现，core `metrics`/`reporting` 不迁移（保留冻结），`SVC-AN-G3` 关闭、K7 挂起
+verified-by: 2026-11-12 W7 两单收口：`AN-GRACEFUL-SHUTDOWN` ✅（`signal.NotifyContext` + 10s 有界 drain + 两条真 listener 用例与真破坏验证）、`AN-REPORT-CONFLICT-409` ✅（`classify` 增 `409 report_conflict` + api-schema §2/§3 词表与幂等语义 + 用例与真破坏验证），原文与施工记录均移入归档；2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 2 条六字段单，证据坐标引 ODR-072 / ODR-069（`tellurion-docs:docs/archive/odr/`）；W5-F6 原派的 `AN-READYZ-PROBE` 经实测证伪撤销（analytics compose 已是 HTTP `/healthz`，弱探针实属 strategy，见 ODR-072 订正注记）。此前 2026-11-11 `ANALYTICS-METRIC-DRIFT` ✅（跨仓 ADR-039 §3 D4-T2 量测前置：`testdata/core-run-metrics.golden.json`（`kind=synthetic_nav`，core 权威实现产出）+ `TestComputedMetrics_NoDriftAgainstCoreGolden` 三指标对拍 + 阈值边界用例；破坏验证真做真还原；真实 run artifact 腿 ⏸ 见归档重开条件）；QT-43 收口 ✅（2026-11-10：⑤ 三条判据逐条点名用例 + 真库/真 core 腿均已成立；剩余项逐条定性为 ⑥ 边界外或不可逆历史数据——token 跨仓分发、Migration 059 存量回填、R2 owner 已裁；SVC-AN-G3 维持 ⛔）；R1 偏差①收口（2026-11-10：core K4 按裁决 ⑲ 落地 404 `run_not_found` / 409 `run_result_incomplete` / 409 `run_result_failed` 三态码，本仓 `ResultReader` 按契约 code 映射、未知 409 fail-closed；3 条新用例 + 一条破坏验证真做真还原）；`SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 analytics 零命中，且 `SVC-CORE-AN-RETIRE` 结论为「保留并冻结」+ K7 生产写者为 0 ⇒ 无消费者，维持 ⛔）；QT-43 真 core 进程 + 真 PG invalid 行端到端实跑（2026-11-10：core 持久读面 200 `status=invalid` → 本仓 409 `run_result_invalid` + reasons 原样透传，反向对照 404 / 503 各一条，库与进程已清）；QT-43 复核（未落项与 2026-10-26 一字不差）；SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）；**2026-11-10 主任裁决 A（ADR-0005）**：本仓定位独立只读分析服务/参考实现，core `metrics`/`reporting` 不迁移（保留冻结），`SVC-AN-G3` 关闭、K7 挂起
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -12,7 +12,7 @@ verified-by: 2026-11-12 W7 收口：`AN-GRACEFUL-SHUTDOWN` ✅（`signal.NotifyC
 
 ## 一、未做 / 挂起 / 外部依赖
 
-> 本节 = 本轮（2026-11-11）台账重整后剩下的挂起项（`K7`）+ 全面审查 W7 新立 2 单中尚未收口的 `AN-REPORT-CONFLICT-409`。`AN-GRACEFUL-SHUTDOWN` 已 ✅（2026-11-12，原文与施工记录见归档）；此前已收口 / 已关闭单的正文与施工记录全部在归档文件里。
+> 本节 = 本轮（2026-11-11）台账重整后剩下的挂起项（`K7`）。全面审查 W7 新立的 2 单（`AN-GRACEFUL-SHUTDOWN` / `AN-REPORT-CONFLICT-409`）已全部 ✅（2026-11-12，原文与施工记录见归档）；此前已收口 / 已关闭单的正文与施工记录全部在归档文件里。
 
 ### K7 · `RegisterBenchmark` 零生产调用 [P2] ⏸
 
@@ -23,16 +23,6 @@ verified-by: 2026-11-12 W7 收口：`AN-GRACEFUL-SHUTDOWN` ✅（`signal.NotifyC
 - **⑤ 验收**：出现真实调用方且有一条端到端用例。
 - **⑥ 边界**：本仓端点；消费者归属由立单时确定。
 - **重开条件**：出现基准写消费者时**另立单**。
-
-### AN-REPORT-CONFLICT-409 · 写侧不可变冲突 `ErrReportConflict` 被误归 500 internal [P3] ⬜
-
-- **① 目标**：让「同 `report_id` 异内容」这类写侧不可变冲突回 **409**（带稳定 wire code），而不是落进 `classify` 的 `default` 被报成 500 `internal`——调用方据此能区分「我重复提交了不同内容」（不可重试）与「服务真坏了」（可重试）。
-- **② 上下文（2026-11-11 全面审查 W2-F12，证据 ODR-069 `tellurion-docs:docs/archive/odr/odr-069-audit-wave2-core-architecture.md`）**：`internal/analysis/errors.go:18` 定义 `ErrReportConflict`；`internal/analysis/pgstore.go:126`（注释「已存在且 completed：只允许同键同内容（no-op），否则 ErrReportConflict」）及 `:194/:267/:295/:349/:354/:360` 多处 `return ErrReportConflict`（PutReport/PutAttribution/PutMonteCarlo 写侧）。但 `internal/httpapi/api.go:357-393` 的 `classify()` switch **没有 `ErrReportConflict` 分支**（grep 零命中）⇒ 落 `default: return http.StatusInternalServerError, "internal", nil`。语义上这是 409 Conflict（资源已存在且不可变），却报成 500。`docs/api-schema.md §2` 的 409 词表（`run_result_*` / `benchmark_data_unavailable` / `report_not_ready`）也未登记写侧冲突码。
-- **③ 要求**：① `classify()` 增 `case errors.Is(err, analysis.ErrReportConflict): return http.StatusConflict, "report_conflict", nil`（wire code 名以 api-schema 词表为准，施工时定稿）；② `docs/api-schema.md §2/§3` 登记该 409 码与「同键同内容 no-op / 同键异内容 409 不可重试」的幂等语义；③ 补一条用例：PutReport 同键异内容 ⇒ 409 `report_conflict`（不是 500）。
-- **④ 约束与非目标**：不改 `ErrReportConflict` 的触发条件与 pgstore 写侧逻辑（只改 HTTP 归类）；不动读侧 `run_result_*` 三态码；不引入新哨兵；不改 `reports_completed_immutable` 约束。
-- **⑤ 验收**：新用例断言写侧冲突 = 409 + 登记码；破坏验证 = 删掉 `classify` 的新分支 ⇒ 用例红（回落 500），还原复绿；`go build/vet/test ./... -count=1` 全绿；api-schema 词表与代码一致。
-- **⑥ 边界**：本仓 `internal/httpapi/api.go` 的 `classify` + `docs/api-schema.md` 词表 + 一条用例；写侧领域逻辑不动。
-- **owner**：待定
 
 ## 二、跨仓指针（不在本仓，勿双写）
 

@@ -437,3 +437,24 @@ func TestIncompleteErrorCarriesMissingField(t *testing.T) {
 		t.Fatalf("missing = %v, want portfolio_values", m["missing"])
 	}
 }
+
+// conflictStore 模拟「同 report_id 已有 completed 且内容不同」：领域层
+// PutReport 返回 ErrReportConflict，HTTP 层必须归类为 409 report_conflict，
+// 不能落进 default 报 500（500 会被调用方当成可重试的服务故障）。
+type conflictStore struct{ *analysis.Memory }
+
+func (conflictStore) PutReport(context.Context, analysis.Report) error {
+	return analysis.ErrReportConflict
+}
+
+func TestReportConflictIs409(t *testing.T) {
+	srv, _ := newTestServer(t, analysis.Options{
+		Store:   conflictStore{Memory: analysis.NewMemory()},
+		Results: &stubReader{results: map[string]*analysis.BacktestResponse{"r1": sampleResult("r1")}},
+	})
+	status, body := post(t, srv, "/api/analysis/metrics", `{"run_id":"r1"}`)
+	wantCode(t, status, body, http.StatusConflict, "report_conflict")
+	if m := decode(t, body); m["error"] == "internal error" {
+		t.Fatalf("report conflict must not be hidden as internal: %v", m)
+	}
+}

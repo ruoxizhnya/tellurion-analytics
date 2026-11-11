@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-11
-verified-by: 2026-11-11 代码-文档对齐审计（kit pin v0.1.4→v0.2.0、R2 owner/形状口径、QT-43 引用改指归档）；2026-11-10 R1 偏差①收口（core K4 三态码 + 本仓按契约 code 映射，§6.1；§2.2 表补 409 两码来源）；2026-11-07 SVC-AN-G4 补五类上游失败（401 / 404 / 409 / 503 / 超时）的本仓返回码与重试口径（§2.2，超时 = 出站 10s context 上界）；2026-11-07 SVC-AN-G1 补 `GET /readyz`（就绪探针：PG + 迁移 + 上游装配，无鉴权不限流）、按身份限流（429 `rate_limited`）、上游 4xx/5xx 映射表（§2.1）、幂等语义写死（§3）与「无列表面」声明（§1）；2026-10-26 H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` 服务间角色入策略表，ADR-0004）与 SVC-AN-G0（`GET /healthz`）
+last-verified: 2026-11-12
+verified-by: 2026-11-12 AN-REPORT-CONFLICT-409：§2 词表新增写侧 `409 report_conflict`（同 `report_id` 已 completed 且内容不同），§3 写死「同键同内容 no-op / 异内容 409 不可重试」；2026-11-11 代码-文档对齐审计（kit pin v0.1.4→v0.2.0、R2 owner/形状口径、QT-43 引用改指归档）；2026-11-10 R1 偏差①收口（core K4 三态码 + 本仓按契约 code 映射，§6.1；§2.2 表补 409 两码来源）；2026-11-07 SVC-AN-G4 补五类上游失败（401 / 404 / 409 / 503 / 超时）的本仓返回码与重试口径（§2.2，超时 = 出站 10s context 上界）；2026-11-07 SVC-AN-G1 补 `GET /readyz`（就绪探针：PG + 迁移 + 上游装配，无鉴权不限流）、按身份限流（429 `rate_limited`）、上游 4xx/5xx 映射表（§2.1）、幂等语义写死（§3）与「无列表面」声明（§1）；2026-10-26 H6（R2 owner 落本仓 + 触发条件成文于 §6.4；`service` 服务间角色入策略表，ADR-0004）与 SVC-AN-G0（`GET /healthz`）
 ---
 
 # API Schema — tellurion-analytics
@@ -78,6 +78,7 @@ verified-by: 2026-11-11 代码-文档对齐审计（kit pin v0.1.4→v0.2.0、R2
 | 上游结果不完整（缺曲线 / holdings / 因子暴露 / artifact 口径） | 409 `run_result_incomplete` + `missing` | 拒算，不猜；`missing` 点名缺哪个输入（词表见 §6） |
 | 基准已登记但取不到序列 | 409 `benchmark_data_unavailable` | 不回落别的基准 / 不拿价格指数冒充全收益 |
 | 报告未完成（导出 / 读取报告体） | 409 `report_not_ready` | 轮询 `GET /reports/{id}` |
+| 写侧不可变冲突（同 `report_id` 已 `completed` 且内容不同） | 409 `report_conflict` | **不可重试**：同键同内容仍是 no-op（§3），异内容才冲突；不回落 500 |
 | 依赖端口未配置 / 未接线（QT-44 队列；或部署未给上游 URL） | 503 `dependency_unavailable` | **不降级**：不伪造结果、不返回空报告、不回落别的数据源；补齐配置或接线后重试 |
 | 超过按身份限流（默认 50 rps / burst 200） | 429 `rate_limited` + `Retry-After: 1` | 退避重试。**鉴权先于限流**：无凭证恒 401、越权恒 403，不会被 429 掩盖。✅ 8 端点（2026-11-07，SVC-AN-G1）；探针 `/healthz`、`/readyz` 豁免 |
 
@@ -126,6 +127,7 @@ verified-by: 2026-11-11 代码-文档对齐审计（kit pin v0.1.4→v0.2.0、R2
 
 - 计算类端点按 `(run_id, analysis_type, params_hash, input_hash, seed, metrics_version)` 派生**确定性** `report_id`：同键重复提交复用已有报告（字节一致），不重复计算。
 - **同键重复 POST 的冻结行为（2026-11-07 写死）**：返回**同一** `report_id` 与**逐字节一致**的响应体（复用已存报告，不重算、不落第二行），**不是** `409`。锚点 = `internal/httpapi.TestSyncPostIsIdempotentOnSameInput`（断言 `PutReport` 只发生一次）；去掉 `Service.*` 的 replay 早退 ⇒ 该用例红。
+- **写侧不可变冲突（2026-11-12 写死）**：报告 `completed` 后不可变（ADR-0002）——同键同内容重复提交是 no-op（上一条），同键**异内容**回 `409 report_conflict`，**不是** `500 internal`：那是调用方提交了不可重试的冲突内容，不是服务内部故障。锚点 = `internal/httpapi.TestReportConflictIs409`（删掉 `classify` 的 `ErrReportConflict` 分支 ⇒ 回落 500，该用例红）。
 - `input_hash` 覆盖所有读取输入（结果体 / 基准 `dataset_hash` / holdings artifact / 因子数据集）：**输入换版 ⇒ 新报告**，不复用旧结论。
 - `params_hash` 是请求参数（基准代码 / 归因方法 / 网格 / n 等）的 canonical hash；不同参数 ⇒ 不同 `report_id`。
 - 异步 job 的提交返回 `{report_id, status:"pending", parent_job_id?}`，轮询用 `GET /reports/{id}`；**作业态（pending/running/completed/failed）不是 K9 三值**，报告只在 completed 时存在。

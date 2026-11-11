@@ -134,7 +134,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 > **鉴权（2026-10-25 已接线，ADR-0003；2026-10-26 加 `service` 档，ADR-0004）**：机制在 kit `auth/httpadapter`（`Parse` + `kind==access` + 角色 any-of + 启动闸；`v0.1.4` 起 `role=service` 豁免 subject 的 `int64` 要求；本仓 pin `v0.2.0`），策略表在本仓 `internal/httpapi/policy.go`。**全部端点** fail-closed：未装配 Authorizer → `503 auth_unavailable`，无 token / 过期 / refresh 当 access → `401 unauthenticated`，角色不足 → `403 forbidden`。6 个 POST = trader（+ admin + **service**），2 个 GET = viewer（+ trader + admin + **service**）；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。
 > `service` 是**服务间**角色（core 代机器调本仓用）：本仓 8 条端点全是分析计算 / 报告读取，**没有**审批 / 留痕 / 配置 / 交易端点，故全表开放（ADR-0004）。签发与分发**不在本仓**——本仓只保证「有 token 就能用」。
 > **wire 契约落点**：core `docs/openapi.yaml`（QT-50 ③-③）。今天它没有下表端点；下表在升格前是目标草案，**不复制进 openapi**。
-> **错误码**：与 `docs/api-schema.md` §2 双向一一对应。
+> **错误码**：与 `docs/api-schema.md` §2 双向一一对应。写侧 `409 report_conflict`（同 `report_id` 已 `completed` 且内容不同）对全部写端点生效——它是不可重试的冲突，不是 `500 internal`（语义见 `api-schema.md` §2 / §3）。
 
 | 端点 | 目标签名（请求 → 响应） | 错误语义 | 幂等 / 版本策略 |
 |---|---|---|---|
@@ -198,7 +198,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 | `internal/analysis/service.go` | 门面：读上游 → 纯函数 → 落 `analysis.*`；未接线端口 ⇒ `ErrDependencyUnavailable` |
 | `internal/upstream/upstream.go` | **上游 HTTP 适配器**：`ResultReader`（core `/api/backtest/{id}/report` = **R1 持久读面**，`result_status` 是 `status` 权威）、`BenchmarkReader`（X1b resolve + snapshot）、`ArtifactReader`（holdings / 因子暴露，interim） |
 | `internal/upstream/sensitivity.go` | **X5b 父作业适配器**：`POST /api/runs/parents`（batch，`base_run_spec={"run_id":…}` 锚点）+ `GET /api/runs/parents/{id}`（`summary.Tasks` 优先，回落 `children`） |
-| `internal/httpapi/api.go` | 8 端点（Go 1.22 mux pattern）、严格 JSON 解码（拒未知字段 / 拒尾随 / 1 MiB 上限）、13 词错误码映射 |
+| `internal/httpapi/api.go` | 8 端点（Go 1.22 mux pattern）、严格 JSON 解码（拒未知字段 / 拒尾随 / 1 MiB 上限）、14 词错误码映射 |
 | `cmd/analyticsservice/main.go` | 进程入口：`-dsn`（PG + 启动迁移）/ `-core-url` / `-data-url` / `-artifact-url` / `-orchestration-url`；未给 DSN 时 Memory（dev）；Async Executor；回环 `127.0.0.1:8087` |
 
 **端到端可用性**（「已接」= 给了对应 URL 即通；未给仍 503）

@@ -376,6 +376,10 @@ func classify(err error) (int, string, []string) {
 		return http.StatusConflict, "benchmark_data_unavailable", nil
 	case errors.Is(err, analysis.ErrReportNotReady):
 		return http.StatusConflict, "report_not_ready", nil
+	case errors.Is(err, analysis.ErrReportConflict):
+		// 写侧不可变冲突：同 report_id 已有 completed 且内容不同。那是调用方
+		// 提交了不可重试的冲突内容，不是服务内部故障（500 会被误当可重试）。
+		return http.StatusConflict, "report_conflict", nil
 	case errors.Is(err, analysis.ErrMethodNotSupported):
 		return http.StatusBadRequest, "method_not_supported", nil
 	case errors.Is(err, analysis.ErrSeedRequired):
