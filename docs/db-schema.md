@@ -54,7 +54,8 @@ verified-by: 2026-11-11 代码-文档对齐审计（§4 core 迁移口径纠偏�
 | 数据 | 真实 owner |
 |---|---|
 | 回测结果 / 指标 | core / `run` |
-| 基准行情、因子值 | `tellurion-data` |
+| 基准行情 | `tellurion-data` |
+| 因子值 | `tellurion`（core；ADR-037：消费点按需求值，不新增 DB 写者） |
 | 规则快照 | `tellurion-risk` |
 
 本仓按 `run_id` 拉结果，**零 import `pkg/backtest` 引擎**（只依赖结果 DTO）。
