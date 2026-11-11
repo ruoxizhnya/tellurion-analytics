@@ -147,23 +147,6 @@ type errorBody struct {
 	InvalidReasons []string `json:"invalid_reasons,omitempty"`
 }
 
-// Envelope 是所有报告响应的公共前缀。
-type Envelope struct {
-	ReportID     string                `json:"report_id"`
-	RunID        string                `json:"run_id"`
-	AnalysisType analysis.AnalysisType `json:"analysis_type"`
-	Status       analysis.ReportStatus `json:"status"`
-}
-
-func envelopeOf(rep analysis.Report) Envelope {
-	return Envelope{
-		ReportID:     rep.ReportID,
-		RunID:        rep.RunID,
-		AnalysisType: rep.AnalysisType,
-		Status:       rep.Status,
-	}
-}
-
 type metricsRequest struct {
 	RunID string `json:"run_id"`
 }
