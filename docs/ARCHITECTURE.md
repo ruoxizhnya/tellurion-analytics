@@ -131,7 +131,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 ### 9.4 C 组 · 服务对外 HTTP 面（升格后）
 
-> **鉴权（2026-10-25 已接线，ADR-0003；2026-10-26 加 `service` 档，ADR-0004）**：机制在 kit `auth/httpadapter`（`Parse` + `kind==access` + 角色 any-of + 启动闸；`v0.1.4` 起 `role=service` 豁免 subject 的 `int64` 要求；本仓 pin `v0.2.0`），策略表在本仓 `internal/httpapi/policy.go`。**全部端点** fail-closed：未装配 Authorizer → `503 auth_unavailable`，无 token / 过期 / refresh 当 access → `401 unauthenticated`，角色不足 → `403 forbidden`。6 个 POST = trader（+ admin + **service**），2 个 GET = viewer（+ trader + admin + **service**）；无 secret + 回环 = 开放，无 secret + 非回环 = **拒绝启动**。
+> **鉴权（2026-10-25 已接线，ADR-0003；2026-10-26 加 `service` 档，ADR-0004）**：机制在 kit `auth/httpadapter`（`Parse` + `kind==access` + 角色 any-of + 启动闸；`v0.1.4` 起 `role=service` 豁免 subject 的 `int64` 要求；本仓 pin `v0.2.0`），策略表在本仓 `internal/httpapi/policy.go`。**全部端点** fail-closed：未装配 Authorizer → `503 auth_unavailable`，无 token / 过期 / refresh 当 access → `401 unauthenticated`，角色不足 → `403 forbidden`。6 个 POST = trader（+ admin + **service**），2 个 GET = viewer（+ trader + admin + **service**）；**鉴权三态（2026-11-12 收紧）**：有 secret = 全闸；无 secret = 只读降级（读公开、写 `503 auth_unavailable`）；无 secret + `AUTH_INSECURE_EXPOSURE=loopback-published` + 回环 = 显式开放（启动 WARN），非回环绑定拒绝启动。
 > `service` 是**服务间**角色（core 代机器调本仓用）：本仓 8 条端点全是分析计算 / 报告读取，**没有**审批 / 留痕 / 配置 / 交易端点，故全表开放（ADR-0004）。签发与分发**不在本仓**——本仓只保证「有 token 就能用」。
 > **wire 契约落点**：core `docs/openapi.yaml`（QT-50 ③-③）。今天它没有下表端点；下表在升格前是目标草案，**不复制进 openapi**。
 > **错误码**：与 `docs/api-schema.md` §2 双向一一对应。写侧 `409 report_conflict`（同 `report_id` 已 `completed` 且内容不同）对全部写端点生效——它是不可重试的冲突，不是 `500 internal`（语义见 `api-schema.md` §2 / §3）。

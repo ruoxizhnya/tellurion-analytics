@@ -52,7 +52,9 @@ Content-Length: 106
 ```
 
 - `/healthz` = 进程活着（无鉴权、无限流）；`/readyz` = PG + 迁移 + 上游装配，缺一项就 503 并把缺的东西写进 `missing`。
-- 没配 `-jwt-secret` 且绑定回环地址时是**开放访问**（故意的本地模式）；绑非回环必须给 secret，否则进程拒绝启动。
+- 鉴权三态（2026-11-12）：有 `JWT_SECRET` = 全闸；**没配 secret 则只读降级**——读端点公开、写端点 `503 auth_unavailable`（本地默认就是这个安全态）；
+  只有显式 `AUTH_INSECURE_EXPOSURE=loopback-published` + 回环绑定时才整体开放（启动 WARN「写面无鉴权」），非回环绑定拒绝启动。
+  `AUTH_ALLOW_INSECURE=false` 可强制「无 secret 就拒绝启动」。
 
 ### 1.2 起完整实例（PG + 四个上游）
 

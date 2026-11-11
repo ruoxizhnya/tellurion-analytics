@@ -26,8 +26,8 @@ verified-by: 2026-11-10 R1 偏差①收口（读取边 `ResultReader` 按 core K
 
 ## 2. 关键时序
 
-0. **鉴权闸 → 限流**（2026-10-25 接线，2026-10-26 加 `service` 档，2026-11-07 加按身份限流）：每个业务请求先过 `requireAuth`——未装配 Authorizer → 503 `auth_unavailable`，
-   无凭证 / 坏 token → 401，角色不足 → 403；6 个 POST 需 `trader` 及以上（+ admin + **service**），2 个 GET 需 `viewer` 及以上（+ trader + admin + **service**）。
+0. **鉴权闸 → 限流**（2026-10-25 接线，2026-10-26 加 `service` 档，2026-11-07 加按身份限流，2026-11-12 收紧为三态）：每个业务请求先过 `requireAuth`——未装配 Authorizer → 503 `auth_unavailable`；
+   无 secret（第 2 态）时读端点直接放行、写端点 503 `auth_unavailable`；有 secret 时无凭证 / 坏 token → 401，角色不足 → 403；6 个 POST 需 `trader` 及以上（+ admin + **service**），2 个 GET 需 `viewer` 及以上（+ trader + admin + **service**）。
    鉴权通过后按身份令牌桶限流（默认 50 rps / burst 200），超限 429 `rate_limited` + `Retry-After: 1`——顺序固定，故 401/403 与 429 可区分。
    `service` 是**服务间**角色（core 代机器调本仓用，ADR-0004）：本仓 8 条端点全是分析计算 / 报告读取，没有审批 / 留痕 / 配置 / 交易面，
    故全表开放；签发与分发不在本仓。通过后才进入下面的计算 / 读取链路。

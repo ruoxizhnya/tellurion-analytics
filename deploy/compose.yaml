@@ -19,7 +19,9 @@ services:
       ANALYTICS_DATA_URL: ${ANALYTICS_DATA_URL:-http://host.docker.internal:8081}
       ANALYTICS_ARTIFACT_URL: ${ANALYTICS_ARTIFACT_URL:-http://host.docker.internal:8088}
       ANALYTICS_ORCHESTRATION_URL: ${ANALYTICS_ORCHESTRATION_URL:-http://host.docker.internal:8088}
-      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      # 鉴权三态：不设 JWT_SECRET ⇒ 第 2 态（读面公开、写面 503 auth_unavailable）；
+      # 要写就必须由部署方显式注入强 secret（不再有 dev-only-change-me 这类公开默认值）。
+      JWT_SECRET: ${JWT_SECRET:-}
       # 凭证来源（QT-77）：analytics 是**发送方**，三个 token 由部署方显式签发
       # （JWT_SECRET=... go run ./tools/issue_service_token.go -sub service:analytics），
       # 仓库里只有空占位；口径见 tellurion:docs/SPEC.md 的「服务间凭证」节。

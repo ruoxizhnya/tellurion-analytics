@@ -59,6 +59,11 @@ go test ./...
 > `go.mod` 现在有两条直接依赖：`pgx v5.11.0`（2026-10-24，施工 ②）与 `tellurion-kit v0.5.0`（2026-10-25 W3 鉴权接线时是 `v0.1.1`，同日随 kit `KT-11` 升到 `v0.1.4`，2026-11-10 随 `KT-13` 升到 `v0.2.0`，2026-11-12 随 `X-DEP-BUMP-CONSUMERS` 升到 `v0.5.0`）。传递依赖随 MVS 抬到 kit `v0.5.0` 的档位：`golang.org/x/net v0.60.0`、`golang.org/x/text v0.42.0`、`golang.org/x/crypto v0.57.0`、`golang.org/x/sync v0.23.0`、`golang.org/x/sys v0.48.0`。**contracts 零依赖，且不打算引入**——DTO owner 已裁 = 本仓（裁决 ③）；真要迁的那天，触发条件见 `docs/api-schema.md` §6.4。
 >
 > 跨仓依赖**只认版本号**（伪版本或 tag），不认源码路径。契约变更走 `tellurion-contracts` 的发布，不走"顺手改一下"。
+>
+> **鉴权三态（2026-11-12 收紧）**：有 `JWT_SECRET` → 全闸；无 secret + 无显式声明 → 只读降级（读端点公开、写端点
+> `503 auth_unavailable`）；无 secret + `AUTH_INSECURE_EXPOSURE=loopback-published` + 回环绑定 → 写面显式开放（启动 WARN
+> 「写面无鉴权」），非回环绑定拒绝启动。`allowInsecure` 由 `AUTH_ALLOW_INSECURE` / `-allow-insecure` 配置，不再硬编码。
+> 细节与锚点见 `docs/api-schema.md` §7、`docs/runbook.md` §1。
 
 ## 5. 活在哪、文档在哪
 

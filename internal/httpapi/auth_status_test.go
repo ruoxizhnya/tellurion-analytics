@@ -117,14 +117,47 @@ func TestAuthEnforcedCurrentState(t *testing.T) {
 	status, body = doRequest(t, noGate, http.MethodGet, "/api/analysis/reports/r1", "", "")
 	wantCode(t, status, body, http.StatusServiceUnavailable, "auth_unavailable")
 
-	// 显式开放（无 secret）不受影响：本地开发 / CI 仍免 token。
-	openSvc := auth.NewTokenService(auth.Config{})
+	// 显式开放（第 3 态：启动期已接受 AUTH_INSECURE_EXPOSURE=loopback-published）
+	// 用 allow-all 替身，不受影响：本地开发 / CI 仍免 token。
 	openServer, _ := newTestServerWithAuthorizer(t, analysis.Options{
 		Results: &stubReader{results: map[string]*analysis.BacktestResponse{"r1": sampleResult("r1")}},
-	}, NewAuthorizer(openSvc))
+	}, NewOpenAuthorizer())
 	status, body = doRequest(t, openServer, http.MethodPost, "/api/analysis/metrics", `{"run_id":"r1"}`, "")
 	if status != http.StatusOK {
 		t.Fatalf("open access metrics: %d %s", status, body)
+	}
+}
+
+// TestAuthPostureThreeStates 钉住三态口径（六仓统一）：
+//
+//  1. 有 secret                → 全闸：无凭证 401；
+//  2. 无 secret + 无显式声明    → 只读降级：写端点 503 auth_unavailable，读端点公开；
+//  3. 无 secret + 显式开放      → 写面全开放（仅启动期已裁决 loopback-published 时装配）。
+func TestAuthPostureThreeStates(t *testing.T) {
+	opts := analysis.Options{
+		Results: &stubReader{results: map[string]*analysis.BacktestResponse{"r1": sampleResult("r1")}},
+	}
+
+	// 第 1 态：有 secret，写端点无凭证 401。
+	enforced, _ := newTestServerWithAuthorizer(t, opts,
+		NewAuthorizer(auth.NewTokenService(auth.Config{JWTSecret: []byte("analytics-posture")})))
+	status, body := doRequest(t, enforced, http.MethodPost, "/api/analysis/metrics", `{"run_id":"r1"}`, "")
+	wantCode(t, status, body, http.StatusUnauthorized, "unauthenticated")
+
+	// 第 2 态：无 secret、无显式声明 → 写 503 / 读公开。
+	degraded, _ := newTestServerWithAuthorizer(t, opts,
+		NewAuthorizer(auth.NewTokenService(auth.Config{})))
+	status, body = doRequest(t, degraded, http.MethodPost, "/api/analysis/metrics", `{"run_id":"r1"}`, "")
+	wantCode(t, status, body, http.StatusServiceUnavailable, "auth_unavailable")
+	// 读端点在降级态不过闸：handler 正常执行（库里没有 r1 ⇒ 404，而不是 401）。
+	status, body = doRequest(t, degraded, http.MethodGet, "/api/analysis/reports/r1", "", "")
+	wantCode(t, status, body, http.StatusNotFound, "report_not_found")
+
+	// 第 3 态：显式开放 → 写读都放行。
+	open, _ := newTestServerWithAuthorizer(t, opts, NewOpenAuthorizer())
+	status, body = doRequest(t, open, http.MethodPost, "/api/analysis/metrics", `{"run_id":"r1"}`, "")
+	if status != http.StatusOK {
+		t.Fatalf("open POST metrics = %d, want 200: %s", status, body)
 	}
 }
 
