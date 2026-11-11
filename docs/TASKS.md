@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-11-11
-verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 2 条六字段单（`AN-GRACEFUL-SHUTDOWN` / `AN-REPORT-CONFLICT-409`），证据坐标引 ODR-072 / ODR-069（`tellurion-docs:docs/archive/odr/`）；W5-F6 原派的 `AN-READYZ-PROBE` 经实测证伪撤销（analytics compose 已是 HTTP `/healthz`，弱探针实属 strategy，见 ODR-072 订正注记）；本轮只立单不修复。此前 2026-11-11 `ANALYTICS-METRIC-DRIFT` ✅（跨仓 ADR-039 §3 D4-T2 量测前置：`testdata/core-run-metrics.golden.json`（`kind=synthetic_nav`，core 权威实现产出）+ `TestComputedMetrics_NoDriftAgainstCoreGolden` 三指标对拍 + 阈值边界用例；破坏验证真做真还原；真实 run artifact 腿 ⏸ 见归档重开条件）；QT-43 收口 ✅（2026-11-10：⑤ 三条判据逐条点名用例 + 真库/真 core 腿均已成立；剩余项逐条定性为 ⑥ 边界外或不可逆历史数据——token 跨仓分发、Migration 059 存量回填、R2 owner 已裁；SVC-AN-G3 维持 ⛔）；R1 偏差①收口（2026-11-10：core K4 按裁决 ⑲ 落地 404 `run_not_found` / 409 `run_result_incomplete` / 409 `run_result_failed` 三态码，本仓 `ResultReader` 按契约 code 映射、未知 409 fail-closed；3 条新用例 + 一条破坏验证真做真还原）；`SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 analytics 零命中，且 `SVC-CORE-AN-RETIRE` 结论为「保留并冻结」+ K7 生产写者为 0 ⇒ 无消费者，维持 ⛔）；QT-43 真 core 进程 + 真 PG invalid 行端到端实跑（2026-11-10：core 持久读面 200 `status=invalid` → 本仓 409 `run_result_invalid` + reasons 原样透传，反向对照 404 / 503 各一条，库与进程已清）；QT-43 复核（未落项与 2026-10-26 一字不差）；SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）；**2026-11-10 主任裁决 A（ADR-0005）**：本仓定位独立只读分析服务/参考实现，core `metrics`/`reporting` 不迁移（保留冻结），`SVC-AN-G3` 关闭、K7 挂起
+last-verified: 2026-11-12
+verified-by: 2026-11-12 W7 收口：`AN-GRACEFUL-SHUTDOWN` ✅（`signal.NotifyContext` + 有界 drain + 两条用例与真破坏验证，原文与施工记录移入归档）；`AN-REPORT-CONFLICT-409` 仍 ⬜；2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 2 条六字段单，证据坐标引 ODR-072 / ODR-069（`tellurion-docs:docs/archive/odr/`）；W5-F6 原派的 `AN-READYZ-PROBE` 经实测证伪撤销（analytics compose 已是 HTTP `/healthz`，弱探针实属 strategy，见 ODR-072 订正注记）。此前 2026-11-11 `ANALYTICS-METRIC-DRIFT` ✅（跨仓 ADR-039 §3 D4-T2 量测前置：`testdata/core-run-metrics.golden.json`（`kind=synthetic_nav`，core 权威实现产出）+ `TestComputedMetrics_NoDriftAgainstCoreGolden` 三指标对拍 + 阈值边界用例；破坏验证真做真还原；真实 run artifact 腿 ⏸ 见归档重开条件）；QT-43 收口 ✅（2026-11-10：⑤ 三条判据逐条点名用例 + 真库/真 core 腿均已成立；剩余项逐条定性为 ⑥ 边界外或不可逆历史数据——token 跨仓分发、Migration 059 存量回填、R2 owner 已裁；SVC-AN-G3 维持 ⛔）；R1 偏差①收口（2026-11-10：core K4 按裁决 ⑲ 落地 404 `run_not_found` / 409 `run_result_incomplete` / 409 `run_result_failed` 三态码，本仓 `ResultReader` 按契约 code 映射、未知 409 fail-closed；3 条新用例 + 一条破坏验证真做真还原）；`SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 analytics 零命中，且 `SVC-CORE-AN-RETIRE` 结论为「保留并冻结」+ K7 生产写者为 0 ⇒ 无消费者，维持 ⛔）；QT-43 真 core 进程 + 真 PG invalid 行端到端实跑（2026-11-10：core 持久读面 200 `status=invalid` → 本仓 409 `run_result_invalid` + reasons 原样透传，反向对照 404 / 503 各一条，库与进程已清）；QT-43 复核（未落项与 2026-10-26 一字不差）；SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）；**2026-11-10 主任裁决 A（ADR-0005）**：本仓定位独立只读分析服务/参考实现，core `metrics`/`reporting` 不迁移（保留冻结），`SVC-AN-G3` 关闭、K7 挂起
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -12,7 +12,7 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 
 ## 一、未做 / 挂起 / 外部依赖
 
-> 本节 = 本轮（2026-11-11）台账重整后剩下的挂起项（`K7`）+ 全面审查 W7 新立 2 单（`AN-GRACEFUL-SHUTDOWN` / `AN-REPORT-CONFLICT-409`）。此前已收口 / 已关闭单的正文与施工记录全部在归档文件里。
+> 本节 = 本轮（2026-11-11）台账重整后剩下的挂起项（`K7`）+ 全面审查 W7 新立 2 单中尚未收口的 `AN-REPORT-CONFLICT-409`。`AN-GRACEFUL-SHUTDOWN` 已 ✅（2026-11-12，原文与施工记录见归档）；此前已收口 / 已关闭单的正文与施工记录全部在归档文件里。
 
 ### K7 · `RegisterBenchmark` 零生产调用 [P2] ⏸
 
@@ -23,16 +23,6 @@ verified-by: 2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 
 - **⑤ 验收**：出现真实调用方且有一条端到端用例。
 - **⑥ 边界**：本仓端点；消费者归属由立单时确定。
 - **重开条件**：出现基准写消费者时**另立单**。
-
-### AN-GRACEFUL-SHUTDOWN · 分析服务无优雅停机，SIGTERM 直接掐断在途请求 [P1] ⬜
-
-- **① 目标**：`cmd/analyticsservice` 收到 SIGTERM/SIGINT 时先停止接受新连接、给在途请求一个有界 drain 窗口再退出，而不是被信号直接杀死。
-- **② 上下文（2026-11-11 全面审查 W5-F2，证据 ODR-072 `tellurion-docs:docs/archive/odr/odr-072-audit-wave5-security-reliability-deps.md`）**：`cmd/analyticsservice/main.go:136` 已建 `http.Server`，`:146` `srv.ListenAndServe()` 带 `err != http.ErrServerClosed` 兜底，但**全文件无 `signal.Notify` / `srv.Shutdown` / `NotifyContext`**（grep 零命中）⇒ `ErrServerClosed` 分支是死代码，SIGTERM 走默认处置直接终止进程。同批四仓（data/risk/analytics/strategy）同形缺陷，见各仓 `*-GRACEFUL-SHUTDOWN` 单；A4 停机演练先行。
-- **③ 要求**：① 用 `signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)` 或等价机制捕获终止信号；② 信号到达后调 `srv.Shutdown(drainCtx)`，drain 窗口有界（建议 ≤10s）；③ drain 超时则 `srv.Close()` 兜底并非零退出；④ 正常 `ListenAndServe` 返回 `ErrServerClosed` 时退出码 0（顺手把 `!=` 改 `errors.Is` 更稳）；⑤ 启动日志点名 drain 窗口时长。
-- **④ 约束与非目标**：不改路由/鉴权/限流/上游 fail-closed 语义；不引入新依赖（标准库 `os/signal` + `context`）；不动 `ResultReader` 与上游装配；不改成「无限等待在途请求」。
-- **⑤ 验收**：真起服务（A4 授权）→ 发一个慢请求 → SIGTERM → 断言该请求在 drain 窗口内正常完成、进程退出码 0；破坏验证 = 去掉信号捕获改回裸 `ListenAndServe` ⇒ 慢请求被掐断（连接 reset / 非零退出），还原复绿。`go build/vet/test ./... -count=1` 全绿。
-- **⑥ 边界**：本仓 `cmd/analyticsservice/main.go` 的 run/serve 段；其余三仓停机归各自单。
-- **owner**：待定
 
 ### AN-REPORT-CONFLICT-409 · 写侧不可变冲突 `ErrReportConflict` 被误归 500 internal [P3] ⬜
 

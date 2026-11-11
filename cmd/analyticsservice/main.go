@@ -11,13 +11,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/ruoxizhnya/tellurion-kit/auth"
@@ -142,10 +145,54 @@ func main() {
 		).Handler()),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	log.Printf("analyticsservice: listening on %s (auth=%t)", *addr, tokens.Enabled())
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	// 先监听再进入 serve：Serve 与 Shutdown 共用同一个 listener，端口冲突在
+	// 这里就报错，不必等 listen 与信号竞态。
+	ln, err := net.Listen("tcp", *addr)
+	if err != nil {
+		log.Fatalf("analyticsservice: listen %s: %v", *addr, err)
+	}
+	// 终止信号只影响 serve；PG 连接与启动期迁移沿用上面的 startup ctx。
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	log.Printf("analyticsservice: listening on %s (auth=%t, drain=%s)", ln.Addr(), tokens.Enabled(), drainTimeout)
+	if err := serve(sigCtx, srv, ln, drainTimeout); err != nil {
 		log.Fatalf("analyticsservice: %v", err)
 	}
+}
+
+// drainTimeout 是收到终止信号后给在途请求的最大排空窗口。
+const drainTimeout = 10 * time.Second
+
+// serve 运行 HTTP 面，并在 ctx 取消（SIGTERM / SIGINT）时优雅停机：
+// 先停止接受新连接，再给在途请求一个有界 drain 窗口。
+//
+// 返回 nil = 正常关闭（进程退出码 0）；Serve 自身出错或 drain 超时则返回非 nil，
+// 由调用方转成非零退出。drain 超时用 Close 强制断开兜底，不无限等待。
+func serve(ctx context.Context, srv *http.Server, ln net.Listener, drain time.Duration) error {
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(ln) }()
+
+	select {
+	case err := <-serveErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+	}
+
+	log.Printf("analyticsservice: shutdown signal received, draining in-flight requests (timeout %s)", drain)
+	drainCtx, cancel := context.WithTimeout(context.Background(), drain)
+	defer cancel()
+	if err := srv.Shutdown(drainCtx); err != nil {
+		log.Printf("analyticsservice: drain did not finish in %s: %v; forcing close", drain, err)
+		_ = srv.Close()
+		return fmt.Errorf("graceful shutdown: %w", err)
+	}
+	if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 
 // healthzPath 是进程健康探针（Dockerfile / compose 的 HEALTHCHECK 消费）。

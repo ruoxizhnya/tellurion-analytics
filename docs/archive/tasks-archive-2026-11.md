@@ -15,6 +15,7 @@
 | SVC-AN-G2 | 服务就绪门 G2：`analysis.*` 唯一 writer 与可重放迁移（ADR-036） | 2026-11-07 | —（原文未记） | [原文](#SVC-AN-G2) |
 | SVC-AN-G4 | 服务就绪门 G4：纯函数口径 · 上游失败语义 · runbook（ADR-036） | 2026-11-07 | —（原文未记） | [原文](#SVC-AN-G4) |
 | ANALYTICS-METRIC-DRIFT | 与 core 指标实现的漂移检测缺失（ADR-039 T2 前置） | 2026-11-11 | 见本条「施工记录」 | [原文](#ANALYTICS-METRIC-DRIFT)；[`../ARCHITECTURE.md`](../ARCHITECTURE.md) |
+| AN-GRACEFUL-SHUTDOWN | 分析服务无优雅停机，SIGTERM 直接掐断在途请求 | 2026-11-12 | 见本条「施工记录」 | [原文](#AN-GRACEFUL-SHUTDOWN)；`tellurion-docs:docs/archive/odr/odr-072-audit-wave5-security-reliability-deps.md` |
 
 ---
 
@@ -576,3 +577,20 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 > - **门禁（真实退出码）**：`gofmt -l` 空；`go build ./...` / `go vet ./...` / `go test ./... -count=1` 全绿（4 包 ok）。
 > - **破坏验证（真做真还原）**：临时把本仓 `calculateVaR` 的分位改为 `idx+1` ⇒ 对拍腿 **FAIL**（`指标漂移 var_95：analytics=-0.009999999999999962 core=-0.010999999999999956`）；还原后 PASS。
 > - **未执行（如实）**：③ 的「真实 core run artifact（净值 + 交易 + 持仓）」腿**未跑**——需要带 seed 数据与行情库的真栈。补齐条件：真栈可复跑一次 completed run 后，把其 artifact 替换/新增为本 fixture（`kind=real_run`，记录 run id + 日期），并按 ADR-039 T2 更新 hash 与基线。该腿未落地前，T2 对「真实 run 的天然漂移」仍只有合成序列覆盖。
+
+<a id="AN-GRACEFUL-SHUTDOWN"></a>
+### AN-GRACEFUL-SHUTDOWN · 分析服务无优雅停机，SIGTERM 直接掐断在途请求 [P1] ✅（2026-11-12）
+
+- **① 目标**：`cmd/analyticsservice` 收到 SIGTERM/SIGINT 时先停止接受新连接、给在途请求一个有界 drain 窗口再退出，而不是被信号直接杀死。
+- **② 上下文（2026-11-11 全面审查 W5-F2，证据 ODR-072 `tellurion-docs:docs/archive/odr/odr-072-audit-wave5-security-reliability-deps.md`）**：`cmd/analyticsservice/main.go:136` 已建 `http.Server`，`:146` `srv.ListenAndServe()` 带 `err != http.ErrServerClosed` 兜底，但**全文件无 `signal.Notify` / `srv.Shutdown` / `NotifyContext`**（grep 零命中）⇒ `ErrServerClosed` 分支是死代码，SIGTERM 走默认处置直接终止进程。同批四仓（data/risk/analytics/strategy）同形缺陷，见各仓 `*-GRACEFUL-SHUTDOWN` 单；A4 停机演练先行。
+- **③ 要求**：① 用 `signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)` 或等价机制捕获终止信号；② 信号到达后调 `srv.Shutdown(drainCtx)`，drain 窗口有界（建议 ≤10s）；③ drain 超时则 `srv.Close()` 兜底并非零退出；④ 正常 `ListenAndServe` 返回 `ErrServerClosed` 时退出码 0（顺手把 `!=` 改 `errors.Is` 更稳）；⑤ 启动日志点名 drain 窗口时长。
+- **④ 约束与非目标**：不改路由/鉴权/限流/上游 fail-closed 语义；不引入新依赖（标准库 `os/signal` + `context`）；不动 `ResultReader` 与上游装配；不改成「无限等待在途请求」。
+- **⑤ 验收**：真起服务（A4 授权）→ 发一个慢请求 → SIGTERM → 断言该请求在 drain 窗口内正常完成、进程退出码 0；破坏验证 = 去掉信号捕获改回裸 `ListenAndServe` ⇒ 慢请求被掐断（连接 reset / 非零退出），还原复绿。`go build/vet/test ./... -count=1` 全绿。
+- **⑥ 边界**：本仓 `cmd/analyticsservice/main.go` 的 run/serve 段；其余三仓停机归各自单。
+- **owner**：待定
+
+> **施工记录（2026-11-12）**：
+> - **落点**：`cmd/analyticsservice/main.go`——`main` 用 `signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)` 捕获终止信号，`net.Listen` 先建 listener（端口冲突立即失败），新增 `serve(ctx, srv, ln, drain)`：`srv.Serve(ln)` 跑在 goroutine，ctx 取消后 `srv.Shutdown` 有界 drain（`drainTimeout = 10s`），超时 `srv.Close()` 强制断开并返回错误（`main` 经 `log.Fatalf` 非零退出）；`ErrServerClosed` 改用 `errors.Is`，正常关闭返回 nil（退出码 0）；启动日志点名 drain 窗口。
+> - **用例**：`cmd/analyticsservice/main_test.go` 新增两条（真 listener + 真 HTTP 请求，用 `cancel()` 等价 SIGTERM；Windows 不支持向子进程投递 SIGTERM/os.Interrupt，故走与 main 相同的 `serve` 路径）：`TestServeDrainsInFlightRequestsOnSignal`（慢请求在 drain 窗口内 200 完成、serve 返回 nil、处理器在 serve 返回前已结束）与 `TestServeDrainTimeoutForcesClose`（drain=10ms 小于处理器 500ms ⇒ serve 非 nil、请求被强制断开，证明窗口有界）。
+> - **验收（真实输出）**：`go build ./...` 通过；`go vet ./cmd/analyticsservice` 无输出；`go test ./cmd/analyticsservice -count=1` → `ok tellurion-analytics/cmd/analyticsservice 0.404s`。
+> - **破坏验证（真做真还原）**：把 `serve` 的 ctx.Done 分支改成「收到信号立即 `return nil`」（删掉 `Shutdown` 块）⇒ `TestServeDrainsInFlightRequestsOnSignal` 红（`main_test.go:136: serve returned before the in-flight handler finished (request not drained)`）；逐字还原后同一命令复绿。
