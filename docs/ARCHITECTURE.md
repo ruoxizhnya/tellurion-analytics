@@ -131,7 +131,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 
 ### 9.4 C 组 · 服务对外 HTTP 面（升格后）
 
-> **鉴权（2026-10-25 已接线，ADR-0003；2026-10-26 加 `service` 档，ADR-0004）**：机制在 kit `auth/httpadapter`（`Parse` + `kind==access` + 角色 any-of + 启动闸；`v0.1.4` 起 `role=service` 豁免 subject 的 `int64` 要求；本仓 pin `v0.2.0`），策略表在本仓 `internal/httpapi/policy.go`。**全部端点** fail-closed：未装配 Authorizer → `503 auth_unavailable`，无 token / 过期 / refresh 当 access → `401 unauthenticated`，角色不足 → `403 forbidden`。6 个 POST = trader（+ admin + **service**），2 个 GET = viewer（+ trader + admin + **service**）；**鉴权三态（2026-11-12 收紧）**：有 secret = 全闸；无 secret = 只读降级（读公开、写 `503 auth_unavailable`）；无 secret + `AUTH_INSECURE_EXPOSURE=loopback-published` + 回环 = 显式开放（启动 WARN），非回环绑定拒绝启动。
+> **鉴权（2026-10-25 已接线，ADR-0003；2026-10-26 加 `service` 档，ADR-0004）**：机制在 kit `auth/httpadapter`（`Parse` + `kind==access` + 角色 any-of + 启动闸；`v0.1.4` 起 `role=service` 豁免 subject 的 `int64` 要求；本仓 pin `v0.2.0`），策略表在本仓 `internal/httpapi/policy.go`。**全部端点** fail-closed：未装配 Authorizer → `503 auth_unavailable`，无 token / 过期 / refresh 当 access → `401 unauthenticated`，角色不足 → `403 forbidden`。6 个 POST = trader（+ admin + **service**），2 个 GET = viewer（+ trader + admin + **service**）；**鉴权三态（2026-11-12 收紧，同日修正第 3 态）**：有 secret = 全闸；无 secret + 无显式声明 = 只读降级（读公开、写 `503 auth_unavailable`），其中非回环绑定拒绝启动；无 secret + 显式声明（`AUTH_INSECURE_EXPOSURE=loopback-published` 或显式 `AUTH_ALLOW_INSECURE=true`）= 任何绑定都开放，启动 WARN 写出「写面无鉴权」+ 绑定地址（非回环额外点名「已对外暴露」）。
 > `service` 是**服务间**角色（core 代机器调本仓用）：本仓 8 条端点全是分析计算 / 报告读取，**没有**审批 / 留痕 / 配置 / 交易端点，故全表开放（ADR-0004）。签发与分发**不在本仓**——本仓只保证「有 token 就能用」。
 > **wire 契约落点**：core `docs/openapi.yaml`（QT-50 ③-③）。今天它没有下表端点；下表在升格前是目标草案，**不复制进 openapi**。
 > **错误码**：与 `docs/api-schema.md` §2 双向一一对应。写侧 `409 report_conflict`（同 `report_id` 已 `completed` 且内容不同）对全部写端点生效——它是不可重试的冲突，不是 `500 internal`（语义见 `api-schema.md` §2 / §3）。
@@ -176,7 +176,7 @@ tellurion-analytics ──(只读)──► core / run（结果）
 | R3 | **sensitivity 的 job 队列**（F3） | **已落（2026-10-25，W8）**：orchestration 的 X5b 父端点（W6）已接；本仓 `SensitivityQueue` = `Submit` + `Status`，`analysis.sensitivity_runs.points` 按父汇总逐点回填；未配置 `-orchestration-url` 仍 503 | 执行侧装配不在本仓（仍正确）：`base_run_spec` 只带 `run_id` 锚点，**core worker 的 `AnchorResolver` 负责从 core 的 `backtest_jobs` 恢复完整请求**；锚点形状不变，无需契约变更 |
 | R4 | **基准数据面与口径**（F4） | **X1b 已落**（`tellurion-data` `/datasets/resolve` + `/datasets/{hash}`）；本仓 `BenchmarkReader` 已接 X1b，按登记的 `adjustment_basis` 取数，basis 不一致即 409 | 保持 `adjustment_basis` 在登记身份里；若将来改走别的数据面，只换适配器 |
 | R5 | **PDF 导出** | **已裁（2026-10-24）= 非目标**：core 现状只有 html（用浏览器打印），无渲染器 | 从目标面移除；只承诺 html / csv（`api-schema.md` §1 / §4）。不引入渲染器、不立 ADR |
-| R6 | **鉴权角色矩阵** | **已裁（2026-10-25）**：6 个 POST = trader、2 个 GET = viewer；机制在 kit `auth/httpadapter`，策略表在本仓 `internal/httpapi/policy.go`（ADR-0003）。**2026-10-26 加 `service` 档**（ADR-0004）：本仓 8 条端点全开 `service`（本仓没有审批 / 留痕 / 配置 / 交易端点，不存在「机器凭证代劳人的责任动作」）；签发与分发不在本仓 | 全端点 fail-closed；无 secret + 非回环拒绝启动；`service` 与真人角色**并列**写在同一条 `Roles`（kit 角色判定 any-of 不排序） |
+| R6 | **鉴权角色矩阵** | **已裁（2026-10-25）**：6 个 POST = trader、2 个 GET = viewer；机制在 kit `auth/httpadapter`，策略表在本仓 `internal/httpapi/policy.go`（ADR-0003）。**2026-10-26 加 `service` 档**（ADR-0004）：本仓 8 条端点全开 `service`（本仓没有审批 / 留痕 / 配置 / 交易端点，不存在「机器凭证代劳人的责任动作」）；签发与分发不在本仓 | 全端点 fail-closed；无 secret 时：无显式声明落只读降级、非回环拒绝启动，显式声明则任何绑定开放并 WARN；`service` 与真人角色**并列**写在同一条 `Roles`（kit 角色判定 any-of 不排序） |
 
 ### 9.8 实现现状（2026-10-24，QT-43 施工 ②）
 

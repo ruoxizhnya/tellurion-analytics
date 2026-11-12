@@ -16,7 +16,7 @@ verified-by: 2026-11-12 AN-REPORT-CONFLICT-409：§2 词表新增写侧 `409 rep
 > **鉴权（2026-10-25 已接线，ADR-0003；2026-10-26 加 `service` 档，ADR-0004）**：机制在 kit `auth/httpadapter`（Bearer → `Parse` →
 > `kind=access` → 角色 any-of；`v0.1.4` 起 `role=service` 不再要求 subject 是 `int64`，否则裁-17 的 `sub=service:<repo>` 在本仓恒 401；本仓 pin `v0.2.0`），策略表在本仓 `internal/httpapi/policy.go`；**8 个分析端点全部**过闸且 fail-closed：
 > 未装配 Authorizer → 503，无凭证 / 坏 token → 401，越权 → 403。6 个 POST = trader（+ admin + **service**），2 个 GET = viewer（+ trader + admin + **service**）。
-> 无 secret + 回环 = 开放；无 secret + 非回环 = **拒绝启动**。现状登记见 §7。
+> 无 secret + 无显式声明 + 回环 = 第 2 态（读公开、写 `503 auth_unavailable`），非回环 = **拒绝启动**；无 secret + 显式声明 = 任何绑定放开（启动 WARN）。现状登记见 §7。
 > **前置现状**：sensitivity 的父作业队列走 G7/X5b（`tellurion-orchestration` QT-44，**W6 已落**）；结果读取走 core 的 **R1 持久读面**（B6-3 `8537ffd`，2026-10-25：`backtest_jobs.result_status` 是 `status` 的唯一权威；`completed` 且 `invalid` 仍返 200（本仓映射 409 `run_result_invalid`），2026-11-10 K4 / 裁决 ⑲ 起 pending/running → 409 `run_result_incomplete`、failed → 409 `run_result_failed`，偏差见 §6.1）；基准走 X1b（已落）；holdings / 因子暴露走 interim artifact 面（R2 的 **DTO owner 已裁 = 本仓**，消费端形状冻结在 §6.2；wire 面仍 interim）。缺依赖即报错，不降级出假报告。
 
 ## 1. 接口面
@@ -285,11 +285,14 @@ verified-by: 2026-11-12 AN-REPORT-CONFLICT-409：§2 词表新增写侧 `409 rep
   - **守卫**：`TestPolicy_ServiceRoleScope`（service 调 8 条端点都不被闸拦下 + viewer 打 POST 仍 403）、`TestPolicy_ServiceRoleCoexistsWithHumanRoles`（service 与真人角色并列写在同一条 `Roles`）、`TestPolicy_ServiceRoleDeclaredOnEveryRoute`（全表都开，新增端点漏表态即红）。
   - ~~**已知跨仓缺口**：kit `Authenticate` 要求 subject 可解析为 `int64`，裁-17 的 `sub=service:<repo>` 会被判 401。~~ **已于 kit `v0.1.4`（KT-11）修复**：`role=service` 的非数字 subject 不再 401（本仓 `go.mod` 已 pin `v0.2.0`，见 `AGENTS.md` §4）。本仓策略表守卫仍只证「本仓判定正确」，生产 token 能否签发 / 分发归 `tellurion:QT-77`。
 - **限流（2026-11-07，SVC-AN-G1）**：鉴权通过后按身份（用户名，其次 subject；开放访问归同一桶）做令牌桶，默认 **50 rps / burst 200**（`internal/httpapi/limit.go`）；超限 `429 rate_limited` + `Retry-After: 1`。顺序固定「鉴权 → 限流」，因此 `401` / `403` 与 `429` 可区分。锚点 = `TestRateLimitIs429AndDistinctFromAuth`、`TestReadyzIsExemptFromAuthAndRateLimit`；探针 `/healthz`（cmd）与 `/readyz`（httpapi 直接注册）都豁免鉴权与限流。
-- **启动闸与三态（2026-11-12 收紧）**：`allowInsecure` 来自配置（`AUTH_ALLOW_INSECURE` / `-allow-insecure`，默认 true），不再硬编码。
+- **启动闸与三态（2026-11-12 收紧，同日修正第 3 态）**：`allowInsecure` 来自配置（`AUTH_ALLOW_INSECURE` / `-allow-insecure`，默认 true），不再硬编码。
   1. **有 `JWT_SECRET`** → 全闸：所有端点 401 / 403（同 §7 上文）。
-  2. **无 secret + 无显式声明** → 进程能起，**只读降级**：读端点（GET）公开，写端点（POST/PUT/PATCH/DELETE）一律 `503 auth_unavailable`。
-  3. **无 secret + `AUTH_INSECURE_EXPOSURE=loopback-published` + 回环绑定** → 写面显式开放（启动打「写面无鉴权」WARN）；
-     非回环绑定启动即拒（含声明拼错 / 空以外的未知值）。`AUTH_ALLOW_INSECURE=false` 时无 secret 一律拒绝启动。
-  容器形态（绑 `0.0.0.0`、发布层 `127.0.0.1`）默认落在第 2 态：读面公开、写面 503；要写必须注入 secret。
-  锚点 = `TestAuthPostureThreeStates`（三态状态码 + code）、`TestResolveAuthMode`（启动裁决与拒绝条件）。
+  2. **无 secret + 无显式声明** → **回环绑定**：进程能起，**只读降级**——读端点（GET）公开，写端点（POST/PUT/PATCH/DELETE）一律 `503 auth_unavailable`；
+     **非回环绑定**：拒绝启动。
+  3. **无 secret + 显式声明**（`AUTH_INSECURE_EXPOSURE=loopback-published`，或显式 `AUTH_ALLOW_INSECURE=true` / `-allow-insecure=true`）→
+     **任何绑定都放开**（写面无鉴权），启动 WARN 必须同时写出「写面无鉴权」与绑定地址；非回环绑定 WARN 额外点名「已对外暴露」。
+     未知声明值 / `AUTH_ALLOW_INSECURE=false` 且无 secret → 拒绝启动。
+  容器形态（绑 `0.0.0.0`、发布层 `127.0.0.1`）**缺省**落在第 2 态：读面公开、写面 503；要写必须注入 secret，或由部署者显式给出开放声明并接受启动 WARN。
+  锚点 = `TestAuthPostureThreeStates`（三态状态码 + code）、`TestResolveAuthMode`（启动裁决与拒绝条件）、`TestLogAuthPosture`（第 3 态 WARN 两件事齐）、
+  `TestAuthState3NonLoopbackServesWrites`（非回环 + 显式声明 → 能起且写面 200）。
 - **接线清单（已完成）**：① `AuthStatus` 常量与用例；② 本节与 §2 两行；③ `ARCHITECTURE.md` §9.7 R6；④ 台账「鉴权」条目（已归档到 `docs/archive/tasks-archive-2026-11.md`）；⑤ `service` 档（策略表 + 三条守卫用例 + ADR-0004 + 本节登记）。

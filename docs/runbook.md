@@ -53,8 +53,9 @@ Content-Length: 106
 
 - `/healthz` = 进程活着（无鉴权、无限流）；`/readyz` = PG + 迁移 + 上游装配，缺一项就 503 并把缺的东西写进 `missing`。
 - 鉴权三态（2026-11-12）：有 `JWT_SECRET` = 全闸；**没配 secret 则只读降级**——读端点公开、写端点 `503 auth_unavailable`（本地默认就是这个安全态）；
-  只有显式 `AUTH_INSECURE_EXPOSURE=loopback-published` + 回环绑定时才整体开放（启动 WARN「写面无鉴权」），非回环绑定拒绝启动。
-  `AUTH_ALLOW_INSECURE=false` 可强制「无 secret 就拒绝启动」。
+  只有**显式声明**（`AUTH_INSECURE_EXPOSURE=loopback-published`，或显式 `AUTH_ALLOW_INSECURE=true` / `-allow-insecure=true`）才整体开放，
+  且**任何绑定**都允许：启动 WARN 同时写出「写面无鉴权」与绑定地址，非回环绑定额外点名「已对外暴露」。
+  无声明时非回环绑定拒绝启动；`AUTH_ALLOW_INSECURE=false` 可强制「无 secret 就拒绝启动」。
 
 ### 1.2 起完整实例（PG + 四个上游）
 
@@ -92,7 +93,7 @@ Get-Content "$env:TEMP\analytics.err.log" -Tail 50 -Wait
 
 | 行 | 含义 | 不对时怎么办 |
 |---|---|---|
-| `authentication disabled (open access); bind address ... is loopback-only` | 本地开放模式 | 非回环部署必须配 `-jwt-secret` |
+| `WARNING 写面无鉴权（authentication disabled）：绑定地址 ...` | 第 3 态显式开放；非回环会带「已对外暴露」 | 生产必须配 `-jwt-secret`，或确保发布层只回环 / 前置鉴权网关 |
 | `WARNING in-memory store` | 没接 PG，重启即丢报告 | 配 `-dsn` / `ANALYTICS_DATABASE_DSN` |
 | `readers wired result=… benchmark=… holdings=… factors=… queue=…` | 五个上游适配器谁接上了 | `false` 的端口对应端点会 fail-closed 成 503 |
 | `listening on <addr> (auth=…)` | 进程已监听 | 端口冲突 / 绑定失败看上一行错误 |

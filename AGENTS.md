@@ -60,9 +60,10 @@ go test ./...
 >
 > 跨仓依赖**只认版本号**（伪版本或 tag），不认源码路径。契约变更走 `tellurion-contracts` 的发布，不走"顺手改一下"。
 >
-> **鉴权三态（2026-11-12 收紧）**：有 `JWT_SECRET` → 全闸；无 secret + 无显式声明 → 只读降级（读端点公开、写端点
-> `503 auth_unavailable`）；无 secret + `AUTH_INSECURE_EXPOSURE=loopback-published` + 回环绑定 → 写面显式开放（启动 WARN
-> 「写面无鉴权」），非回环绑定拒绝启动。`allowInsecure` 由 `AUTH_ALLOW_INSECURE` / `-allow-insecure` 配置，不再硬编码。
+> **鉴权三态（2026-11-12 收紧，同日修正第 3 态）**：有 `JWT_SECRET` → 全闸；无 secret + 无显式声明 → 只读降级（读端点公开、写端点
+> `503 auth_unavailable`），其中**非回环绑定拒绝启动**；无 secret + **显式声明**（`AUTH_INSECURE_EXPOSURE=loopback-published`，
+> 或显式 `AUTH_ALLOW_INSECURE=true` / `-allow-insecure=true`）→ **任何绑定都允许放开**，启动 WARN 同时写出「写面无鉴权」与
+> 绑定地址，非回环绑定额外点名「已对外暴露」。`allowInsecure` 由 `AUTH_ALLOW_INSECURE` / `-allow-insecure` 配置，不再硬编码。
 > 细节与锚点见 `docs/api-schema.md` §7、`docs/runbook.md` §1。
 
 ## 5. 活在哪、文档在哪
