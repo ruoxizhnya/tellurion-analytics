@@ -17,6 +17,7 @@
 | ANALYTICS-METRIC-DRIFT | 与 core 指标实现的漂移检测缺失（ADR-039 T2 前置） | 2026-11-11 | 见本条「施工记录」 | [原文](#ANALYTICS-METRIC-DRIFT)；[`../ARCHITECTURE.md`](../ARCHITECTURE.md) |
 | AN-GRACEFUL-SHUTDOWN | 分析服务无优雅停机，SIGTERM 直接掐断在途请求 | 2026-11-12 | 见本条「施工记录」 | [原文](#AN-GRACEFUL-SHUTDOWN)；`tellurion-docs:docs/archive/odr/odr-072-audit-wave5-security-reliability-deps.md` |
 | AN-REPORT-CONFLICT-409 | 写侧不可变冲突 `ErrReportConflict` 被误归 500 internal | 2026-11-12 | 见本条「施工记录」 | [原文](#AN-REPORT-CONFLICT-409)；`tellurion-docs:docs/archive/odr/odr-069-audit-wave2-core-architecture.md` |
+| X-DEP-BUMP-CONSUMERS | 消费方依赖抬升（kit v0.5.0 / go 1.26.11）+ govulncheck 门 | 2026-11-12 | `19a2246`（pin）、回补见本条 | [施工记录](#X-DEP-BUMP-CONSUMERS) |
 
 ---
 
@@ -613,3 +614,14 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 > - **用例**：`internal/httpapi/api_test.go` 新增 `TestReportConflictIs409`：`conflictStore`（嵌入 `analysis.Memory`、`PutReport` 恒返 `ErrReportConflict`）驱动 `POST /api/analysis/metrics`，断言 409 + `code=report_conflict` 且 `error` 不是 `internal error`。
 > - **验收（真实输出）**：`go test ./internal/httpapi -run TestReportConflictIs409 -count=1 -v` → `PASS`；全量 `go build ./... && go vet ./... && go test ./... -count=1` 全绿（4 包 ok）。
 > - **破坏验证（真做真还原）**：临时删掉 `classify` 的 `ErrReportConflict` 分支 ⇒ 同一用例红（`got 500 map[code:internal error:internal error], want 409 report_conflict`，日志 `httpapi: internal error: report conflict`）；逐字还原后复绿。
+
+<a id="X-DEP-BUMP-CONSUMERS"></a>
+### X-DEP-BUMP-CONSUMERS · 消费方依赖抬升（本仓部分，跨仓伞 `tellurion:X-DEP-BUMP-CONSUMERS`）
+
+> **施工记录（2026-11-12）**：
+> - **首轮（`19a2246`）**：kit `v0.2.0 → v0.5.0`、`go` directive `1.25.0 → 1.26.11`（pgx 本仓已是 `v5.11.0`，无需再动）；AGENTS §4 同批对齐；CI 增 `-race` 与 `staticcheck`。**但漏了伞单 ③-② 的 `govulncheck` 门** —— 台账当时未单独立条，属「pin 升了、门没加」的半完成。
+> - **回补（本次提交）**：`.github/workflows/ci.yml` 在 `Vet` 之后新增 `Govulncheck` 步（`go run golang.org/x/vuln/cmd/govulncheck@latest ./...`），与 core 腿同一做法。
+> - **验收（真实输出）**：`govulncheck ./...` → `Your code is affected by 0 vulnerabilities.`，EXIT=0（另有 3 条模块级不可达漏洞，只计数不失败）。
+> - **破坏验证（真做真还原）**：`go mod edit` 把 kit 降回 `v0.2.0`、pgx 降回 `v5.7.3` 并 `go mod tidy` ⇒ `govulncheck` 报 `GO-2026-5004`、EXIT=1；从备份逐字节还原 `go.mod` / `go.sum`（SHA256 与降版前一致：`go.mod D11C03BC…F6A1`、`go.sum BDC1D020…6BBB`）后复跑 EXIT=0。
+> - **门禁**：`gofmt -l .` 无输出；`go build/vet/test ./... -count=1` 全绿（4 包 ok）。
+> - **边界**：只动本仓 CI；其余消费仓由各自伞腿承担。
