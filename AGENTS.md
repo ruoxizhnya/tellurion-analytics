@@ -25,6 +25,7 @@ go test ./...
 - 这三条是 R1/R2 的判据：**单独 checkout 就能绿**。
 - 若某一步需要别的仓的源码目录才过，那是**边界画错了**——停下来修边界，**不要**加 `replace ../xxx` 绕过。
 - 本机同时改多个仓时可用 `go.work` 联调，但**它不入库**（`.gitignore` 已挡）。
+- CI（`.github/workflows/ci.yml`，单 job `go`）：`gofmt` → `go build` → `go vet` → `govulncheck@latest ./...`（依赖漏洞门，X-DEP-BUMP-CONSUMERS）→ `go test ./... -count=1` → `go test -race ./... -count=1`（竞态门，X-CI-RACE-STATICCHECK）→ `staticcheck@latest ./...`（`go install` 后跑，未钉版本）。
 
 ## 3. 边界（硬约束）
 
