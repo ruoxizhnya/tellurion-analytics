@@ -25,7 +25,9 @@ go test ./...
 - 这三条是 R1/R2 的判据：**单独 checkout 就能绿**。
 - 若某一步需要别的仓的源码目录才过，那是**边界画错了**——停下来修边界，**不要**加 `replace ../xxx` 绕过。
 - 本机同时改多个仓时可用 `go.work` 联调，但**它不入库**（`.gitignore` 已挡）。
-- CI（`.github/workflows/ci.yml`，单 job `go`）：`gofmt` → `go build` → `go vet` → `govulncheck@latest ./...`（依赖漏洞门，X-DEP-BUMP-CONSUMERS）→ `go test ./... -count=1` → `go test -race ./... -count=1`（竞态门，X-CI-RACE-STATICCHECK）→ `staticcheck@latest ./...`（`go install` 后跑，未钉版本）。
+- CI（`.github/workflows/ci.yml`，单 job `go`）：`gofmt` → `go build` → `go vet` → `govulncheck@latest ./...`（依赖漏洞门，X-DEP-BUMP-CONSUMERS）→ `go test -p 1 ./... -count=1 -coverprofile=coverage.out` + **覆盖率门**（ANALYTICS-CI-GATES）→ `go test -p 1 -race ./... -count=1`（竞态门，X-CI-RACE-STATICCHECK）→ `staticcheck@latest ./...`（`go install` 后跑，未钉版本）。
+- **CI 的 DB 腿（ANALYTICS-CI-GATES，2026-11-13）**：Test job 起 `postgres:16` service（`pg_isready -U postgres -d tellurion_analytics_test`）并注入 `ANALYTICS_TEST_DSN`（CI 内 `127.0.0.1:5432/tellurion_analytics_test`；**绝不指向部署库**）。本仓无 migrations 目录，DDL 由 `internal/analysis` 内嵌、真库用例在 `OpenPG` 后调 `Migrate` 执行，因此 CI **不另设迁移步骤**（手写 SQL 会与内嵌 DDL 双写漂移）。`-p 1` 是必须的：真库用例共享同一个库，`Migrate` 的 DDL（`DROP/CREATE TRIGGER`）需 `reports` 的 AccessExclusive 锁，与其他包并发会真 deadlock（SQLSTATE 40P01，已实测）。效果：库侧 **9 条**用例由 SKIP 转 PASS（带 DSN 112 PASS / 1 SKIP，无 DSN 103 PASS / 10 SKIP）；剩下的 1 条是 `TestSensitivityEndToEndWithOrchestrationProcess`，需 `ORCHESTRATION_TEST_DSN` + 编排进程，按设计 skip。
+- **覆盖率门（ANALYTICS-CI-GATES）**：阈值 **72%**（语句加权，`go tool cover -func` 的 `total`），来源 = 2026-11-13 在隔离 PG 16 上真跑全套件实测 **77.1%**，取整 77 减 5（跨仓口径见 `tellurion:docs/TASKS.md` → `X-COVERAGE-FLOOR`）。低于阈值 `exit 1`。**如实边界**：本仓 1,642 条语句，删单个可编译测试文件最多掉 4.6 点（实测 `internal/analysis/sensitivity_test.go` ⇒ 72.5%，仍在门内），所以 5 点余量是防累计漂移的缓冲，**不是单文件绊线**；删到会破坏编译的测试文件（如 `internal/analysis/pgstore_test.go`、`internal/httpapi/api_test.go`，其 helper 被同包其他用例复用）时该 CI 步直接 `EXIT=1` 红，还原后复绿。
 
 ## 3. 边界（硬约束）
 

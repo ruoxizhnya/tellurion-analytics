@@ -12,6 +12,33 @@ jobs:
   go:
     name: Build & Test
     runs-on: ubuntu-latest
+    # ANALYTICS-CI-GATES：真库腿。库侧用例原本按设计 skip（见 AGENTS §2），
+    # 这里起一个隔离 PG 并注入 DSN，让它们真跑。
+    #
+    # 迁移入口：本仓没有 migrations 目录，DDL 由 internal/analysis.Migrations() 内嵌，
+    # 由每个真库用例的连接入口（openTestPG / TestEndToEndWithPostgres）在 OpenPG 之后
+    # 调 Migrate 执行。因此这里**不另设迁移步骤**——手写 SQL 会与内嵌 DDL 双写漂移，
+    # 复制 core 脚本也违反单仓边界。
+    #
+    # `-p 1`：所有真库用例共享同一个库，而 Migrate 的 DDL（DROP/CREATE TRIGGER 等）
+    # 需要 reports 的 AccessExclusive 锁；与别的包正在写 reports 的事务并发会真 deadlock
+    # （SQLSTATE 40P01，已实测）。串行跑包即可，不削弱任何用例。
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tellurion_analytics_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tellurion_analytics_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ANALYTICS_TEST_DSN: postgres://postgres:postgres@127.0.0.1:5432/tellurion_analytics_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
@@ -42,11 +69,23 @@ jobs:
       - name: Govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-      - name: Test
-        run: go test ./... -count=1
+      # 覆盖率门（ANALYTICS-CI-GATES）：基线 = 2026-11-13 在隔离 PG 16 上实跑
+      # `go test -p 1 ./... -count=1 -coverprofile=coverage.out` 的 total 77.1%；
+      # 取整 77 - 5 = 72%（口径见 AGENTS.md §2）。低于门 exit 1。
+      # 破坏验证：删掉一个含实质断言的测试文件 ⇒ 本步红；还原 ⇒ 绿。
+      - name: Test（真库腿 + 覆盖率门）
+        run: |
+          go test -p 1 ./... -count=1 -coverprofile=coverage.out
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/,"",$3); print $3}')"
+          if [ -z "$total" ]; then
+            echo "覆盖率门：未能从 coverage.out 解析 total"
+            exit 1
+          fi
+          echo "total coverage: ${total}%（门：72%）"
+          awk -v t="$total" 'BEGIN { if (t + 0 < 72.0) { printf("覆盖率门红：%.1f%% < 72%%（基线 77.1% 取整 77 - 5）\n", t); exit 1 } }'
 
       - name: Test（-race，数据竞争即红）
-        run: go test -race ./... -count=1
+        run: go test -p 1 -race ./... -count=1
 
       - name: Staticcheck
         run: |

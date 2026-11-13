@@ -77,7 +77,7 @@ verified-by: 2026-11-11 实读 README / AGENTS / ARCHITECTURE / api-schema / db-
 
 - **常驻进程**：`cmd/analyticsservice`（唯一 HTTP 监听）；无独立 worker。
 - **存活/就绪语义**：
-  - `GET /health`：进程存活。
+  - `GET /healthz`：进程存活（规范名，代码 `healthzPath`；容器 `HEALTHCHECK` 消费）。
   - `GET /readyz`：PG 可达且迁移完成；未配置上游端口**不算**未就绪，而是对应端点运行期 `503 dependency_unavailable`。
 - **鉴权**：有 `JWT_SECRET` 时全端点过策略表；无 secret + 回环开放，无 secret + 非回环**拒绝启动**。
 - **部署真相**：`deploy/compose.yaml`、`Dockerfile`、`README.md` 快速开始。
@@ -97,7 +97,7 @@ verified-by: 2026-11-11 实读 README / AGENTS / ARCHITECTURE / api-schema / db-
 
 - **影响面**：`none`——当前零调用方，主链路与前端不受影响；只影响直接调用分析端点的人 / 脚本，以及等待敏感性回填的编排父作业。
 - **先确认（按顺序）**：
-  1. `GET /health` 是否 200；不是则看进程日志与启动参数（尤其无 secret + 非回环的拒起）。
+  1. `GET /healthz` 是否 200；不是则看进程日志与启动参数（尤其无 secret + 非回环的拒起）。
   2. `GET /readyz` 是否 200；503 时看 PG 连通与 `analysis.*` 迁移。
   3. 单端点 `503 dependency_unavailable` 时看对应上游 URL 是否注入、上游是否健康；按 runbook §6「上游排查」走。
 - **升级路径**：`owner` → 跨仓争议 → core `docs/TASKS.md`

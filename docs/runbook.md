@@ -233,7 +233,7 @@ $env:DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/tellurion_core_in
 $env:SERVER_HOST='127.0.0.1'; $env:SERVER_PORT='18085'; $env:AUTH_INSECURE='true'
 $env:RISK_SERVICE_RESOLVE_ENABLED='false'; $env:ALERT_ENABLED='false'
 go build -o "$env:TEMP\analysis.exe" .\cmd\analysis
-& "$env:TEMP\analysis.exe"      # 另开窗口；GET /health 期望 200
+& "$env:TEMP\analysis.exe"      # 另开窗口；GET /healthz 期望 200
 
 # 3) 直插 invalid 行（psql -c 传 JSON 在 PowerShell 5 会被吃引号 ⇒ 写 .sql 文件用 -f；
 #    用 WriteAllText 避免 Set-Content -Encoding UTF8 在 PS5 写入 BOM，psql 会把 BOM 当语法错）

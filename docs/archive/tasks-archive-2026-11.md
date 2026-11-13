@@ -18,6 +18,8 @@
 | AN-GRACEFUL-SHUTDOWN | 分析服务无优雅停机，SIGTERM 直接掐断在途请求 | 2026-11-12 | 见本条「施工记录」 | [原文](#AN-GRACEFUL-SHUTDOWN)；`tellurion-docs:docs/archive/odr/odr-072-audit-wave5-security-reliability-deps.md` |
 | AN-REPORT-CONFLICT-409 | 写侧不可变冲突 `ErrReportConflict` 被误归 500 internal | 2026-11-12 | 见本条「施工记录」 | [原文](#AN-REPORT-CONFLICT-409)；`tellurion-docs:docs/archive/odr/odr-069-audit-wave2-core-architecture.md` |
 | X-DEP-BUMP-CONSUMERS | 消费方依赖抬升（kit v0.5.0 / go 1.26.11）+ govulncheck 门 | 2026-11-12 | `19a2246`（pin）、回补见本条 | [施工记录](#X-DEP-BUMP-CONSUMERS) |
+| ANALYTICS-CI-GATES | CI 起 PG 16 + 覆盖率门（库侧 9 条 SKIP→PASS；实测 77.1% → 门 72%） | 2026-11-13 | 见本条 | [原文与施工记录](#ANALYTICS-CI-GATES) |
+| AN-SERVICE-PROBE-NAME | `SERVICE.md` 探针名 `/health` → `/healthz`（+ runbook 一处现状陈述） | 2026-11-13 | 见本条 | [原文与施工记录](#AN-SERVICE-PROBE-NAME) |
 
 ---
 
@@ -625,3 +627,35 @@ PG / 真进程腿逐条实跑（PASS，非 skip）：
 > - **破坏验证（真做真还原）**：`go mod edit` 把 kit 降回 `v0.2.0`、pgx 降回 `v5.7.3` 并 `go mod tidy` ⇒ `govulncheck` 报 `GO-2026-5004`、EXIT=1；从备份逐字节还原 `go.mod` / `go.sum`（SHA256 与降版前一致：`go.mod D11C03BC…F6A1`、`go.sum BDC1D020…6BBB`）后复跑 EXIT=0。
 > - **门禁**：`gofmt -l .` 无输出；`go build/vet/test ./... -count=1` 全绿（4 包 ok）。
 > - **边界**：只动本仓 CI；其余消费仓由各自伞腿承担。
+
+---
+
+## 2026-11-13 收口
+
+<a id="ANALYTICS-CI-GATES"></a>
+### ANALYTICS-CI-GATES · CI 起 PG 并设覆盖率门（3 条 DB 用例不再 skip）[P2] ✅ 2026-11-13
+
+> 档 4（测试）· 来源：03-testing P1-3 / P2-2 · 顺序 4-8 · 依赖：core 伞 `X-COVERAGE-FLOOR`
+
+- **① 目标**：CI 真跑 DB 腿（3 条按设计 skip 的用例），并补覆盖率门。
+- **② 上下文**：Test job 无 postgres service / 无 DSN，库侧用例长期 skip；本仓迁移入口与 DSN 变量名施工时以测试代码为准确认。
+- **③ 要求**：① 加 `postgres:16` service + healthcheck；② 注入 DSN；③ Test 前应用本仓迁移；④ 本地无 DSN 仍 skip；⑤ 覆盖率门 = 实测 - 5。
+- **④ 约束与非目标**：不改业务代码；不把 skip 改成假通过；不把 analytics 拉进主流程。
+- **⑤ 验收**：CI 中 DB 用例 PASS（数量 > 0）；删测试 ⇒ 门红；本地无 DSN ⇒ skip 且原因可读。
+- **⑥ 边界**：本仓 CI + 测试夹具。
+
+**施工记录（2026-11-13）**：DSN 变量按代码取 `ANALYTICS_TEST_DSN`；迁移入口 = `internal/analysis` 内嵌 DDL，真库用例在 `OpenPG` 后调 `Migrate`，CI 不另设迁移步（避免与内嵌 DDL 双写漂移）。CI 起 `postgres:16` service（`pg_isready -U postgres -d tellurion_analytics_test`）+ 注入 DSN；`Test` 步改 `go test -p 1 ... -coverprofile` + 覆盖率门。`-p 1` 是实测必需：`Migrate` 的 `DROP/CREATE TRIGGER` 需 `reports` AccessExclusive 锁，与其他包并发写会真 deadlock（SQLSTATE 40P01）。**实测（隔离 PG16 容器 55432 / 库 `tellurion_analytics_test`，未碰部署库）**：带 DSN `112 PASS / 1 SKIP`、覆盖率 `77.1%`；无 DSN `103 PASS / 10 SKIP`。单内「3 条」是旧口径，**实测库侧 9 条**由 SKIP 转 PASS，余 1 条 `TestSensitivityEndToEndWithOrchestrationProcess` 需 `ORCHESTRATION_TEST_DSN`+编排进程，按设计 skip。门 = 77 取整 - 5 = **72%**。破坏验证真做真还原：删 `internal/analysis/pgstore_test.go` ⇒ 同包 helper 缺失、测试步 `EXIT=1` 红，`git checkout` 还原后复绿；另实测可编译单文件最大影响 4.6 点（删 `internal/analysis/sensitivity_test.go` ⇒ 72.5%），故 5 点余量按「防累计漂移」定位，已如实写入 `AGENTS.md`。
+
+<a id="AN-SERVICE-PROBE-NAME"></a>
+### AN-SERVICE-PROBE-NAME · `SERVICE.md` 探针名改 `/healthz` [P2] ✅ 2026-11-13
+
+> 档 5（文档与代码一致性）· 来源：04-doc-consistency P2-1 · 顺序 5-5 · 依赖：无
+
+- **① 目标**：消除 analytics 仓内两份文档对同一探针的互相矛盾。
+- **② 上下文**：`SERVICE.md:80`、`:100` 写 `GET /health`；代码实际注册 `/healthz`（`cmd/analyticsservice/main.go`），同仓 `docs/api-schema.md` §4 也写 `/healthz`。
+- **③ 要求**：`SERVICE.md` 两处改为 `/healthz`；全文扫 `/health` 残留（区分"历史记录"与"现状陈述"）；必要时在探针段写"以代码为准"。
+- **④ 约束与非目标**：不改代码；不改 `api-schema.md`（已正确）；不动历史归档。
+- **⑤ 验收**：仓内活跃文档 0 处把现状探针写成 `/health`；`grep -rn "GET /health\b" SERVICE.md` 0 命中；与代码/契约一致。
+- **⑥ 边界**：`tellurion-analytics/SERVICE.md`。
+
+**施工记录（2026-11-13）**：`SERVICE.md:80` 改 `GET /healthz`（注明规范名来自代码 `healthzPath`、容器 `HEALTHCHECK` 消费），`:100` 排障首步同步改 `/healthz`；全文扫描另发现 `docs/runbook.md:236` 的现状陈述写 `/health`，一并改 `/healthz`。归档文件里的历史记录保留原样。复核：`SERVICE.md` 对 `GET /health` 0 命中；活跃文档中仅剩本单原文（已随本节入归档）与历史归档出现旧名。未改代码与 `api-schema.md`。
