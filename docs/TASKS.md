@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-11-13
-verified-by: 2026-11-13 五角审查档 4 立单（只立单不施工）——新立 `ANALYTICS-CI-GATES`；此前：2026-11-12 挂起任务处置批次（主任指令）——K7 维持 ⏸（零写者未变）；§一 补归档挂起腿指针（ANALYTICS-METRIC-DRIFT 真实 run artifact 腿，ADR-039 T2 前置）。此前： 2026-11-12 `X-DEP-BUMP-CONSUMERS` 回补 `govulncheck` 门（首轮 `19a2246` 只升 pin 未加门，本次补 CI 步并真做降版破坏验证）；W7 两单收口：`AN-GRACEFUL-SHUTDOWN` ✅（`signal.NotifyContext` + 10s 有界 drain + 两条真 listener 用例与真破坏验证）、`AN-REPORT-CONFLICT-409` ✅（`classify` 增 `409 report_conflict` + api-schema §2/§3 词表与幂等语义 + 用例与真破坏验证），原文与施工记录均移入归档；2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 2 条六字段单，证据坐标引 ODR-072 / ODR-069（`tellurion-docs:docs/archive/odr/`）；W5-F6 原派的 `AN-READYZ-PROBE` 经实测证伪撤销（analytics compose 已是 HTTP `/healthz`，弱探针实属 strategy，见 ODR-072 订正注记）。此前 2026-11-11 `ANALYTICS-METRIC-DRIFT` ✅（跨仓 ADR-039 §3 D4-T2 量测前置：`testdata/core-run-metrics.golden.json`（`kind=synthetic_nav`，core 权威实现产出）+ `TestComputedMetrics_NoDriftAgainstCoreGolden` 三指标对拍 + 阈值边界用例；破坏验证真做真还原；真实 run artifact 腿 ⏸ 见归档重开条件）；QT-43 收口 ✅（2026-11-10：⑤ 三条判据逐条点名用例 + 真库/真 core 腿均已成立；剩余项逐条定性为 ⑥ 边界外或不可逆历史数据——token 跨仓分发、Migration 059 存量回填、R2 owner 已裁；SVC-AN-G3 维持 ⛔）；R1 偏差①收口（2026-11-10：core K4 按裁决 ⑲ 落地 404 `run_not_found` / 409 `run_result_incomplete` / 409 `run_result_failed` 三态码，本仓 `ResultReader` 按契约 code 映射、未知 409 fail-closed；3 条新用例 + 一条破坏验证真做真还原）；`SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 analytics 零命中，且 `SVC-CORE-AN-RETIRE` 结论为「保留并冻结」+ K7 生产写者为 0 ⇒ 无消费者，维持 ⛔）；QT-43 真 core 进程 + 真 PG invalid 行端到端实跑（2026-11-10：core 持久读面 200 `status=invalid` → 本仓 409 `run_result_invalid` + reasons 原样透传，反向对照 404 / 503 各一条，库与进程已清）；QT-43 复核（未落项与 2026-10-26 一字不差）；SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）；**2026-11-10 主任裁决 A（ADR-0005）**：本仓定位独立只读分析服务/参考实现，core `metrics`/`reporting` 不迁移（保留冻结），`SVC-AN-G3` 关闭、K7 挂起
+verified-by: 2026-11-13 五角审查档 4 立单（只立单不施工）——新立 `ANALYTICS-CI-GATES`；档 5 新立 `AN-SERVICE-PROBE-NAME`；此前：2026-11-12 挂起任务处置批次（主任指令）——K7 维持 ⏸（零写者未变）；§一 补归档挂起腿指针（ANALYTICS-METRIC-DRIFT 真实 run artifact 腿，ADR-039 T2 前置）。此前： 2026-11-12 `X-DEP-BUMP-CONSUMERS` 回补 `govulncheck` 门（首轮 `19a2246` 只升 pin 未加门，本次补 CI 步并真做降版破坏验证）；W7 两单收口：`AN-GRACEFUL-SHUTDOWN` ✅（`signal.NotifyContext` + 10s 有界 drain + 两条真 listener 用例与真破坏验证）、`AN-REPORT-CONFLICT-409` ✅（`classify` 增 `409 report_conflict` + api-schema §2/§3 词表与幂等语义 + 用例与真破坏验证），原文与施工记录均移入归档；2026-11-11 全面审查 W7 台账立单（A5 授权）——新立 2 条六字段单，证据坐标引 ODR-072 / ODR-069（`tellurion-docs:docs/archive/odr/`）；W5-F6 原派的 `AN-READYZ-PROBE` 经实测证伪撤销（analytics compose 已是 HTTP `/healthz`，弱探针实属 strategy，见 ODR-072 订正注记）。此前 2026-11-11 `ANALYTICS-METRIC-DRIFT` ✅（跨仓 ADR-039 §3 D4-T2 量测前置：`testdata/core-run-metrics.golden.json`（`kind=synthetic_nav`，core 权威实现产出）+ `TestComputedMetrics_NoDriftAgainstCoreGolden` 三指标对拍 + 阈值边界用例；破坏验证真做真还原；真实 run artifact 腿 ⏸ 见归档重开条件）；QT-43 收口 ✅（2026-11-10：⑤ 三条判据逐条点名用例 + 真库/真 core 腿均已成立；剩余项逐条定性为 ⑥ 边界外或不可逆历史数据——token 跨仓分发、Migration 059 存量回填、R2 owner 已裁；SVC-AN-G3 维持 ⛔）；R1 偏差①收口（2026-11-10：core K4 按裁决 ⑲ 落地 404 `run_not_found` / 409 `run_result_incomplete` / 409 `run_result_failed` 三态码，本仓 `ResultReader` 按契约 code 映射、未知 409 fail-closed；3 条新用例 + 一条破坏验证真做真还原）；`SVC-AN-G3` ⛔ 前置复核（2026-11-10：core 非测试 Go 对 analytics 零命中，且 `SVC-CORE-AN-RETIRE` 结论为「保留并冻结」+ K7 生产写者为 0 ⇒ 无消费者，维持 ⛔）；QT-43 真 core 进程 + 真 PG invalid 行端到端实跑（2026-11-10：core 持久读面 200 `status=invalid` → 本仓 409 `run_result_invalid` + reasons 原样透传，反向对照 404 / 503 各一条，库与进程已清）；QT-43 复核（未落项与 2026-10-26 一字不差）；SVC-ORCH-G1 调用方腿（`SensitivityQueue` 携带 service token、`ANALYTICS_ORCHESTRATION_TOKEN` 接线，2026-11-09）；SVC-AN-G1/G2/G4 真库腿补齐（便携 PostgreSQL 16.2 @ 55432：/readyz 200→503→200、迁移重放、全套 -count=1 绿）；**2026-11-10 主任裁决 A（ADR-0005）**：本仓定位独立只读分析服务/参考实现，core `metrics`/`reporting` 不迁移（保留冻结），`SVC-AN-G3` 关闭、K7 挂起
 ---
 
 # TASKS — tellurion-analytics 未完成项
@@ -38,6 +38,19 @@ verified-by: 2026-11-13 五角审查档 4 立单（只立单不施工）——�
 - **④ 约束与非目标**：不改业务代码；不把 skip 改成假通过；不把 analytics 拉进主流程。
 - **⑤ 验收**：CI 中 DB 用例 PASS（数量 > 0）；删测试 ⇒ 门红；本地无 DSN ⇒ skip 且原因可读。
 - **⑥ 边界**：本仓 CI + 测试夹具。
+
+#### 2026-11-13 五角审查 · 档 5（文档与代码一致性）
+
+### AN-SERVICE-PROBE-NAME · `SERVICE.md` 探针名改 `/healthz` [P2] ⬜
+
+> 档 5（文档与代码一致性）· 来源：04-doc-consistency P2-1 · 顺序 5-5 · 依赖：无
+
+- **① 目标**：消除 analytics 仓内两份文档对同一探针的互相矛盾。
+- **② 上下文**：`SERVICE.md:80`、`:100` 写 `GET /health`；代码实际注册 `/healthz`（`cmd/analyticsservice/main.go`），同仓 `docs/api-schema.md` §4 也写 `/healthz`。
+- **③ 要求**：`SERVICE.md` 两处改为 `/healthz`；全文扫 `/health` 残留（区分"历史记录"与"现状陈述"）；必要时在探针段写"以代码为准"。
+- **④ 约束与非目标**：不改代码；不改 `api-schema.md`（已正确）；不动历史归档。
+- **⑤ 验收**：仓内活跃文档 0 处把现状探针写成 `/health`；`grep -rn "GET /health\b" SERVICE.md` 0 命中；与代码/契约一致。
+- **⑥ 边界**：`tellurion-analytics/SERVICE.md`。
 
 ## 二、跨仓指针（不在本仓，勿双写）
 
